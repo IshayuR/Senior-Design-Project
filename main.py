@@ -2,7 +2,7 @@ import paho.mqtt.client as mqtt
 import ssl
 
 # Connection parameters
-AWS_IOT_ENDPOINT = "YOUR-ENDPOINT.iot.YOUR-REGION.amazonaws.com"
+AWS_IOT_ENDPOINT = "aws:iot:620194173995:thing/esp32.iot.us-east-1.amazonaws.com"
 PORT = 8883
 CLIENT_ID = "esp32"
 
