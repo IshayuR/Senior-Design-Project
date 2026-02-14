@@ -1,5 +1,21 @@
 import paho.mqtt.client as mqtt
 import ssl
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
+
+@app.route("/light", methods=["POST"])
+def control_light():
+    data = request.json
+    state = data.get("state")  # "on" or "off"
+    
+    print("Received light state:", state)
+
+    # TODO: send MQTT to ESP32 or AWS IoT
+
+    return jsonify({"status": "ok", "received": state})
+
+app.run(host="0.0.0.0", port=5000)
 
 # Connection parameters
 AWS_IOT_ENDPOINT = "aws:iot:620194173995:thing/esp32.iot.us-east-1.amazonaws.com"
