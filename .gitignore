@@ -13,8 +13,10 @@ frontend/.expo/
 *.pem
 *.crt
 *.key
-*.pylintrc
-*.env.example
+
+# Configuration files
+.pylintrc
+.env.example
 
 # Environment variables
 .env
