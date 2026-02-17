@@ -65,7 +65,7 @@ class DeviceDocument(BaseModel):
     """
     model_config = {"populate_by_name": True, "extra": "allow"}
 
-    _id: str = Field(..., alias="_id", description="Device ID e.g. ESP32_MCD_DARIEN_001")
+    id: str = Field(..., alias="_id", description="Device ID e.g. ESP32_MCD_DARIEN_001")  # CHANGED
     restaurant: str = Field(..., description="Restaurant display name")
     restaurantId: str = Field(..., description="Restaurant business ID e.g. mcd_1234")
     location: str = Field(..., description="Location description")
@@ -108,7 +108,7 @@ class ScheduleDocument(BaseModel):
     """
     model_config = {"populate_by_name": True, "extra": "allow"}
 
-    _id: Any = Field(..., alias="_id", description="Schedule ObjectId")
+    id: Any = Field(..., alias="_id", description="Schedule ObjectId")  # CHANGED
     deviceId: str = Field(..., description="Device ID this schedule applies to")
     restaurant: str = Field(..., description="Restaurant name")
     restaurantId: str | None = Field(None, description="Restaurant business ID")
@@ -148,7 +148,7 @@ class TimeDataDocument(BaseModel):
     """
     model_config = {"populate_by_name": True, "extra": "allow"}
 
-    _id: Any = Field(..., alias="_id", description="Document ObjectId")
+    id: Any = Field(..., alias="_id", description="Document ObjectId")  # CHANGED
     timestamp: datetime = Field(..., description="Reading timestamp")
     metadata: TimeDataMetadata = Field(..., description="Device/location metadata")
     measurements: TimeDataMeasurements = Field(..., description="V, I, P, uptime")
@@ -164,7 +164,7 @@ class UserDocument(BaseModel):
     """
     model_config = {"populate_by_name": True, "extra": "allow"}
 
-    _id: str = Field(..., alias="_id", description="User ID (email)")
+    id: str = Field(..., alias="_id", description="User ID (email)")  # CHANGED
     email: str = Field(..., description="Email")
     name: str = Field(..., description="Display name")
     password: str = Field(..., description="Hashed password")
@@ -184,7 +184,7 @@ class LightHistoryDocument(BaseModel):
     """
     model_config = {"populate_by_name": True, "extra": "allow"}
 
-    _id: Any | None = Field(None, alias="_id")
+    id: Any | None = Field(None, alias="_id")  # CHANGED
     restaurantId: str = Field(..., description="Restaurant ID e.g. mcd_1234")
     deviceId: str | None = Field(None, description="Device _id (matches Devices._id)")
     action: str = Field(..., description="toggle_on, toggle_off, schedule_set")
