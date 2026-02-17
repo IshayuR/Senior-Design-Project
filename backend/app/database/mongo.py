@@ -24,7 +24,14 @@ def get_mongo_client() -> MongoClient:
         raise RuntimeError("MONGODB_URI is not set; add it to .env to use MongoDB.")
     global _client
     if _client is None:
-        _client = MongoClient(MONGODB_URI)
+        _client = MongoClient(
+        MONGODB_URI,
+        maxPoolSize=10,          
+        minPoolSize=1,           
+        maxIdleTimeMS=60000,     
+        retryWrites=True,          
+        retryReads=True          
+        )
     return _client
 
 
