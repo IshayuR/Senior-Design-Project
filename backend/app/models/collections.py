@@ -1,5 +1,5 @@
 """
-MongoDB collection schemas: one-to-one with your Atlas collections.
+SD_IoT MongoDB schema: five collections (Devices, light_history, Schedules, Time_Data, users).
 Use these for validation, serialization, and as the source of field names/metadata.
 """
 from __future__ import annotations
@@ -61,36 +61,33 @@ class DeviceStatus(BaseModel):
 
 class DeviceDocument(BaseModel):
     """
-    Devices collection document. Matches your Atlas schema.
-    Optional fields (legacyRestaurantId, lightState, brightness, scheduleOn, scheduleOff)
-    are for placeholder API compatibility.
+    Devices collection (SD_IoT). Restaurant/device information with light control fields.
     """
     model_config = {"populate_by_name": True, "extra": "allow"}
 
     _id: str = Field(..., alias="_id", description="Device ID e.g. ESP32_MCD_DARIEN_001")
-    restaurant: str = Field(..., description="Restaurant display name e.g. McDonald's")
+    restaurant: str = Field(..., description="Restaurant display name")
     restaurantId: str = Field(..., description="Restaurant business ID e.g. mcd_1234")
-    location: str = Field(..., description="Location description e.g. I-95 Rest Area, Darien, CT")
+    location: str = Field(..., description="Location description")
     address: DeviceAddress = Field(..., description="Address object")
     contact: DeviceContact = Field(..., description="Contact info")
     device: DeviceInfo = Field(..., description="Device model/firmware info")
     status: DeviceStatus = Field(..., description="Online status and last reading")
     scheduleId: Any | None = Field(None, description="Reference to Schedules._id (ObjectId)")
-    createdAt: datetime = Field(..., description="Creation timestamp")
-    updatedAt: datetime = Field(..., description="Last update timestamp")
-    ownerEmail: str = Field(..., description="Owner email")
+    createdAt: datetime = Field(..., description="Creation timestamp (ISO)")
+    updatedAt: datetime = Field(..., description="Last update timestamp (ISO)")
+    ownerEmail: str = Field(..., description="Owner email (references users)")
 
-    # Placeholder API compatibility (optional)
-    legacyId: int | None = Field(None, description="Maps to API restaurantId (int); alias legacyRestaurantId")
-    legacyRestaurantId: int | None = Field(None, description="Maps to API restaurantId (int); alias for legacyId")
-    lightState: Literal["on", "off"] | None = Field(None, description="Light on/off (default 'off')")
+    # Light control fields
+    lightState: Literal["on", "off"] | None = Field(None, description="Light on/off")
     brightness: int | None = Field(
         None, ge=BRIGHTNESS_PERCENT_MIN, le=BRIGHTNESS_PERCENT_MAX,
-        description="Light brightness 0-100 (default 0)"
+        description="Brightness 0-100"
     )
-    scheduleOn: str | None = Field(None, description="Active schedule on time 24h 'HH:MM' e.g. '18:00'")
-    scheduleOff: str | None = Field(None, description="Active schedule off time 24h 'HH:MM'")
+    scheduleOn: str | None = Field(None, description="Schedule on time 'HH:MM' or null")
+    scheduleOff: str | None = Field(None, description="Schedule off time 'HH:MM' or null")
     lastUpdated: str | datetime | None = Field(None, description="ISO timestamp of last light-state change")
+    legacyId: int | None = Field(None, description="Integer 1-5; maps API restaurant_id to this device")
 
 
 # ---------------------------------------------------------------------------
@@ -107,13 +104,14 @@ class ScheduleRule(BaseModel):
 
 class ScheduleDocument(BaseModel):
     """
-    Schedules collection document. Matches your Atlas schema.
+    Schedules collection (SD_IoT). Detailed schedule rules per device.
     """
     model_config = {"populate_by_name": True, "extra": "allow"}
 
     _id: Any = Field(..., alias="_id", description="Schedule ObjectId")
     deviceId: str = Field(..., description="Device ID this schedule applies to")
     restaurant: str = Field(..., description="Restaurant name")
+    restaurantId: str | None = Field(None, description="Restaurant business ID")
     name: str = Field(..., description="Schedule name e.g. Exterior Lights Schedule")
     enabled: bool = Field(..., description="Whether schedule is active")
     rules: list[ScheduleRule] = Field(..., description="List of day/hour rules")
@@ -146,7 +144,7 @@ class TimeDataMeasurements(BaseModel):
 
 class TimeDataDocument(BaseModel):
     """
-    Time_Data collection document. Telemetry/sensor readings.
+    Time_Data collection (SD_IoT). Time-series sensor readings.
     """
     model_config = {"populate_by_name": True, "extra": "allow"}
 
@@ -162,7 +160,7 @@ class TimeDataDocument(BaseModel):
 
 class UserDocument(BaseModel):
     """
-    users collection document. Matches your Atlas schema.
+    users collection (SD_IoT). User accounts and device access.
     """
     model_config = {"populate_by_name": True, "extra": "allow"}
 
@@ -177,23 +175,21 @@ class UserDocument(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# light_history (placeholder-compat collection used by lights API)
+# light_history (SD_IoT)
 # ---------------------------------------------------------------------------
 
 class LightHistoryDocument(BaseModel):
     """
-    light_history collection: audit trail for user-initiated light actions.
-    Schema per Database Schema Report: restaurantId (string), deviceId (optional), action, timestamp.
-    legacyId (int) is stored for API filtering and response (restaurant_id).
+    light_history collection (SD_IoT). Logs every light action.
     """
     model_config = {"populate_by_name": True, "extra": "allow"}
 
     _id: Any | None = Field(None, alias="_id")
-    restaurantId: str = Field(..., description="Restaurant identifier e.g. mcd_1234 (matches Devices.restaurantId)")
-    deviceId: str | None = Field(None, description="Device _id for easier joins")
-    action: str = Field(..., description="One of: toggle_on, toggle_off, schedule_set (or schedule_set_HH:MM_HH:MM)")
+    restaurantId: str = Field(..., description="Restaurant ID e.g. mcd_1234")
+    deviceId: str | None = Field(None, description="Device _id (matches Devices._id)")
+    action: str = Field(..., description="toggle_on, toggle_off, schedule_set")
     timestamp: str | datetime = Field(..., description="ISO timestamp of the event")
-    legacyId: int | None = Field(None, description="API restaurantId (int) for filtering and response")
+    legacyId: int | None = Field(None, description="Integer matching device legacyId (1-5)")
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +197,7 @@ class LightHistoryDocument(BaseModel):
 # ---------------------------------------------------------------------------
 
 class CollectionNames:
-    """MongoDB collection names used by the app."""
+    """SD_IoT collection names."""
     DEVICES = "Devices"
     SCHEDULES = "Schedules"
     TIME_DATA = "Time_Data"

@@ -1,119 +1,93 @@
-# Schema mapping: your 4 collections → placeholder (restaurant_lights + light_history)
+# Schema Mapping: Placeholder Tables and SD_IoT Collections (CSE Senior Design, Budderfly)
 
-The existing backend expects a **placeholder** shape: two logical tables (`restaurant_lights` and `light_history`) with integer `restaurant_id`. Your data lives in four MongoDB collections. This doc describes how they map so the app can use your schema without changing the API.
+This document describes the MongoDB database used by the backend and how it relates to the placeholder API. The backend expects two logical tables (`restaurant_lights` and `light_history`). The database **SD_IoT** contains five collections that implement this contract and support the lighting control system.
 
-**Your collections in code:** The four MongoDB collections and the placeholder-compat `light_history` are defined one-to-one in **`app.models.collections`** (and re-exported from `app.models`): `DeviceDocument`, `ScheduleDocument`, `TimeDataDocument`, `UserDocument`, `LightHistoryDocument`. Field names and metadata there match the document examples for each collection. Collection names are in `CollectionNames`.
+## Overview
 
----
+The MongoDB database is named **SD_IoT** and contains five collections. The API uses an integer `restaurant_id` (1–5) that maps to devices via the `legacyId` field. Light state is read from and written to the **Devices** collection; event history is stored in the **light_history** collection. The remaining collections (**Schedules**, **Time_Data**, **users**) support the system but are not required to satisfy the two-table placeholder shape.
 
-## Placeholder shape (what the API expects)
+## 1. `Devices` Collection
 
-### restaurant_lights (one row per “restaurant” / light)
+Stores restaurant/device information with light control fields:
 
-| Placeholder field | Type   | Description |
-|------------------|--------|-------------|
-| `restaurant_id`  | int    | Identifies which restaurant/device. |
-| `state`          | "on" / "off" | Light on or off. |
-| `brightness`     | 0–100  | Light brightness. |
-| `schedule_on`    | "HH:MM" or null | Scheduled on time (24h). |
-| `schedule_off`   | "HH:MM" or null | Scheduled off time (24h). |
-| `last_updated`   | ISO datetime | Last change. |
+- `_id`: string (e.g., `"ESP32_MCD_DARIEN_001"`)
+- `restaurant`: string
+- `restaurantId`: string (e.g., `"mcd_1234"`)
+- `location`: string
+- `address`, `contact`, `device`, `status`: objects
+- `scheduleId`: ObjectId (references Schedules collection)
+- `createdAt`, `updatedAt`: ISO dates
+- `ownerEmail`: string (references users collection)
+- `lightState`: `"on"` / `"off"` (added for light control)
+- `brightness`: 0–100 integer
+- `scheduleOn`: `"HH:MM"` or null
+- `scheduleOff`: `"HH:MM"` or null
+- `lastUpdated`: ISO timestamp
+- `legacyId`: integer (1–5, maps API `restaurant_id` to this device)
 
-### light_history (events)
+## 2. `light_history` Collection
 
-| Placeholder field | Type   | Description |
-|------------------|--------|-------------|
-| `id`             | int    | Unique event id. |
-| `restaurant_id`  | int    | Which restaurant. |
-| `action`         | string | e.g. "toggle_on", "schedule_set_20:00_02:00". |
-| `timestamp`      | ISO datetime | When it happened. |
+Logs every light action:
 
----
+- `_id`: ObjectId
+- `restaurantId`: string (e.g., `"mcd_1234"`)
+- `deviceId`: string (matches `Devices._id`)
+- `action`: string (`"toggle_on"`, `"toggle_off"`, `"schedule_set"`)
+- `timestamp`: ISO string
+- `legacyId`: integer (matches the device’s `legacyId`)
 
-## How your 4 collections map into that
+## 3. `Schedules` Collection
 
-### 1. `restaurant_id` (int) ↔ which device
+Stores detailed schedule rules (unchanged):
 
-- The API uses **integer** `restaurant_id` (e.g. `1`, `2`).
-- Your data uses **string** IDs: `Devices._id`, `Devices.restaurantId`.
+- `_id`: ObjectId
+- `deviceId`: string
+- `restaurant`: string
+- `restaurantId`: string
+- `name`: string
+- `enabled`: boolean
+- `rules`: array of day/time objects
+- `createdBy`, `createdAt`, `updatedAt`
 
-**Mapping options:**
+## 4. `Time_Data` Collection
 
-- **Option A (recommended):** Add an optional field on each device document:
-  - `legacyRestaurantId: 1` (or 2, 3, …) so one integer maps to one device.
-- **Option B:** If that field is missing, the code falls back to **position**: first device (by `_id`) = 1, second = 2, etc. Order can change if you add/remove devices.
+Time-series sensor readings (unchanged):
 
-So: **Devices** is the source for “one row per restaurant/light”; `restaurant_id` in the API is either `legacyRestaurantId` or that position.
+- `timestamp`: ISODate
+- `metadata`: { `deviceId`, `restaurant`, `restaurantId`, `location` }
+- `measurements`: { `V`, `I`, `P`, `uptime` }
 
-### 2. `restaurant_lights` fields from your collections
+## 5. `users` Collection
 
-| Placeholder field | Source in your schema | Notes |
-|-------------------|------------------------|--------|
-| `restaurant_id`   | See above (Devices + optional `legacyRestaurantId`). | Int used in API. |
-| `state`           | **Devices** – optional `lightState`: `"on"` \| `"off"`. | Not in your original Devices; we add it for placeholder compatibility. Default `"off"` if missing. |
-| `brightness`      | **Devices** – optional `brightness`: 0–100. | Same; add for compatibility. Default `0` if missing. |
-| `schedule_on`     | **Devices** – optional `scheduleOn`: `"HH:MM"` **or** **Schedules** – first rule’s `startHour` → `"HH:00"`. | Prefer Device field; else derive from linked Schedule. |
-| `schedule_off`    | **Devices** – optional `scheduleOff`: `"HH:MM"` **or** **Schedules** – first rule’s `endHour` → `"HH:00"`. | Same. |
-| `last_updated`    | **Devices** – `updatedAt` or `status.lastSeen`. | Use existing datetime; keep in ISO form for API. |
+User accounts (unchanged):
 
-So: **Devices** is the main source. Adding optional `lightState`, `brightness`, `scheduleOn`, `scheduleOff` keeps the placeholder contract; if you prefer not to change Devices, the code can default state/brightness and derive schedule from **Schedules** when possible.
+- `_id`: email string
+- `email`: string
+- `name`: string
+- `password`: hashed
+- `role`: string
+- `restaurants`: array of device `_id`s
+- `createdAt`, `updatedAt`
 
-### 3. **Schedules** (for schedule_on / schedule_off when not on Device)
+## Key Mapping for the Backend
 
-- Link: **Devices** has `scheduleId` → **Schedules._id** (or match by `deviceId`).
-- One schedule can have many **rules** (days, startHour, endHour, action).
-- **Conversion:** Use the **first rule** (or first “ON” rule):  
-  `startHour` → `schedule_on = f"{startHour:02d}:00"`,  
-  `endHour` → `schedule_off = f"{endHour:02d}:00"`.  
-- If you **set** schedule via the API (e.g. “20:00” / “02:00”), the implementation can either update that rule in **Schedules** or store only on **Devices** in `scheduleOn` / `scheduleOff` (simpler).
+- The API uses integer `restaurant_id` (1–5) → maps to `Devices.legacyId`
+- Light state comes from `Devices.lightState`, `brightness`, `scheduleOn`, `scheduleOff`, and `lastUpdated`
+- History comes from the `light_history` collection
+- Schedules can be derived from `Devices.scheduleOn` / `scheduleOff` or the `Schedules` collection
 
-### 4. **Time_Data**
+## Placeholder Tables (What the API Expects)
 
-- Telemetry (V, I, P, uptime, etc.), not toggle events.
-- **Not used** for the placeholder’s `light_history` (which is for actions like “toggle_on”, “schedule_set_…”). So no direct mapping from Time_Data to `light_history`.
+The existing API contract is defined in terms of two logical tables:
 
-### 5. **light_history** (placeholder events)
+**restaurant_lights** (one row per restaurant/device): `restaurant_id`, `state`, `brightness`, `schedule_on`, `schedule_off`, `last_updated`. Implemented from the **Devices** collection (and optionally **Schedules** when schedule is not stored on the device).
 
-- Your schema doesn’t have an equivalent “event log” for light toggles/schedule changes.
-- **Conversion:** Add a **fifth collection**, e.g. **light_history**, with documents like:
-  - `restaurant_id` (int, same mapping as above),
-  - `action` (string),
-  - `timestamp` (datetime or ISO string).
-- The backend will **write** here on toggle/schedule and **read** here for history. So the placeholder “table” is implemented as this collection.
+**light_history** (events): `id`, `restaurant_id`, `action`, `timestamp`. Implemented as the **light_history** collection. The backend writes toggle and schedule events here and reads from it for the history endpoint.
 
-### 6. **users**
+## Code Reference
 
-- No direct mapping to `restaurant_lights` or `light_history`. Use for auth / “who changed what” later if you want.
-
----
-
-## Summary
-
-| Placeholder concept      | Implemented from your schema |
-|-------------------------|------------------------------|
-| One “light” per restaurant | One **Device** per restaurant; `restaurant_id` = `legacyRestaurantId` or 1-based index. |
-| state, brightness       | Optional fields on **Devices** (or defaults). |
-| schedule_on / schedule_off | Optional on **Devices** and/or from **Schedules** first rule. |
-| last_updated            | **Devices** `lastUpdated` (last light-state change) or `updatedAt` / `status.lastSeen`. |
-| light_history           | **light_history** collection: `restaurantId`, `deviceId`, `action`, `timestamp`, `legacyId`. |
-
-So: **convert** by (1) using **Devices** (and optionally **Schedules**) to fill the logical `restaurant_lights` row, (2) adding optional fields on Devices and one **light_history** collection so the existing API keeps working without changing your four main collections’ structure for anything else.
+The five collections are defined in **`app.models.collections`** (and re-exported from `app.models`): `DeviceDocument`, `ScheduleDocument`, `TimeDataDocument`, `UserDocument`, `LightHistoryDocument`. Collection names are in `CollectionNames`. When `MONGODB_URI` is set in the backend `.env`, the application uses `MongoLightRepository` and the SD_IoT database; otherwise it uses SQLite.
 
 ---
 
-## What to add in MongoDB so the backend can use your schema
-
-1. **On each Device document (per Database Schema Report):**
-   - `legacyId` or `legacyRestaurantId`: integer (e.g. `1`, `2`) so the API's `restaurantId` maps to this device. The repo checks `legacyId` first, then `legacyRestaurantId`, then 1-based index by `_id`.
-   - `lightState`: `"on"` or `"off"` (default `"off"`).
-   - `brightness`: 0–100 (default `0`).
-   - `scheduleOn`, `scheduleOff`: `"HH:MM"` 24h or null.
-   - `lastUpdated`: ISO string of the last light-state change (set by the backend on update).
-
-2. **Collection `light_history`**
-   - Documents: `restaurantId` (string, e.g. `"mcd_1234"`), `deviceId` (string, optional), `action` (e.g. `"toggle_on"`, `"toggle_off"`, `"schedule_set_20:00_02:00"`), `timestamp` (ISO string), `legacyId` (int, for API filter/response).
-   - The backend inserts these on toggle/schedule and reads for the history endpoint.
-
-3. **Backend config**
-   - In backend `.env`: `MONGODB_URI=mongodb+srv://...` (and optionally `MONGODB_DB_NAME=SD_IoT`).
-   - With `MONGODB_URI` set, the app uses `MongoLightRepository` and your four collections (plus `light_history`); without it, it keeps using SQLite.
+*Designed and maintained by the CSE team, University of Connecticut. Project sponsored by Budderfly.*

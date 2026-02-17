@@ -1,5 +1,5 @@
 """
-MongoDB connection for Atlas. Set MONGODB_URI (and optional MONGODB_DB_NAME) in .env.
+MongoDB connection for SD_IoT database. Set MONGODB_URI and optional MONGODB_DB_NAME in .env.
 """
 from __future__ import annotations
 

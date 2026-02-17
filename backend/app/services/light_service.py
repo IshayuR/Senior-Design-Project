@@ -63,9 +63,7 @@ class LightRepository(ABC):
 
 
 class SQLiteLightRepository(LightRepository):
-    # MongoDB migration point:
-    # add a MongoLightRepository implementing LightRepository,
-    # then swap dependency wiring in routes/main without changing service logic.
+    """SQLite backend when MONGODB_URI is not set."""
     def get_or_create_light(self, restaurant_id: int) -> dict[str, Any]:
         with get_connection() as conn:
             cursor = conn.cursor()
@@ -163,7 +161,7 @@ class SQLiteLightRepository(LightRepository):
 
 
 def _datetime_to_iso(value: Any) -> str:
-    """Turn MongoDB date or ISO string into ISO string for placeholder compatibility."""
+    """Turn MongoDB date or ISO string into ISO string."""
     if value is None:
         return _utc_now_iso()
     if hasattr(value, "isoformat"):
@@ -173,9 +171,8 @@ def _datetime_to_iso(value: Any) -> str:
 
 class MongoLightRepository(LightRepository):
     """
-    Uses your 4 collections (Devices, Schedules, Time_Data, users) plus
-    light_history. Field names match app.models.collections (DeviceDocument, etc.).
-    Converts to placeholder shape for the existing lights API. See docs/SCHEMA_MAPPING.md.
+    SD_IoT MongoDB: Devices, light_history, Schedules, Time_Data, users.
+    Field names match app.models.collections (DeviceDocument, LightHistoryDocument, etc.).
     """
     DEVICES = CollectionNames.DEVICES
     SCHEDULES = CollectionNames.SCHEDULES
@@ -186,30 +183,24 @@ class MongoLightRepository(LightRepository):
 
     def _device_for_restaurant_id(self, restaurant_id: int) -> dict[str, Any] | None:
         devices = self._db[self.DEVICES]
-        # Prefer legacyId (per Database Schema Report), then legacyRestaurantId, then index
         device_doc = devices.find_one({"legacyId": restaurant_id})
-        if device_doc is not None:
-            return device_doc
-        device_doc = devices.find_one({"legacyRestaurantId": restaurant_id})
         if device_doc is not None:
             return device_doc
         cursor = devices.find().sort("_id", MONGO_SORT_ASCENDING).skip(restaurant_id - 1).limit(1)
         return next(cursor, None)
 
-    def _placeholder_row_from_device(self, device: dict[str, Any], restaurant_id: int) -> dict[str, Any]:
-        # DeviceDocument placeholder fields: lightState, brightness, scheduleOn, scheduleOff
+    def _status_row_from_device(self, device: dict[str, Any], restaurant_id: int) -> dict[str, Any]:
+        # Devices collection: lightState, brightness, scheduleOn, scheduleOff, lastUpdated
         state = device.get("lightState", DEFAULT_LIGHT_STATE_OFF)
         brightness = int(device.get("brightness", DEFAULT_BRIGHTNESS_OFF))
         schedule_on = device.get("scheduleOn")
         schedule_off = device.get("scheduleOff")
         if schedule_on is None or schedule_off is None:
-            # Derive from Schedules (ScheduleDocument.rules first rule startHour/endHour)
             schedule_doc = self._schedule_for_device(device)
             if schedule_doc and schedule_doc.get("rules"):
                 first_rule = schedule_doc["rules"][FIRST_SCHEDULE_RULE_INDEX]
                 schedule_on = schedule_on or f"{first_rule.get('startHour', DEFAULT_HOUR):02d}:00"
                 schedule_off = schedule_off or f"{first_rule.get('endHour', DEFAULT_HOUR):02d}:00"
-        # DeviceDocument.lastUpdated (last light-state change), else updatedAt or status.lastSeen
         last_updated_raw = (
             device.get("lastUpdated")
             or device.get("updatedAt")
@@ -246,7 +237,7 @@ class MongoLightRepository(LightRepository):
                 "schedule_off": None,
                 "last_updated": _utc_now_iso(),
             }
-        return self._placeholder_row_from_device(device, restaurant_id)
+        return self._status_row_from_device(device, restaurant_id)
 
     def update_light(
         self,
@@ -261,7 +252,6 @@ class MongoLightRepository(LightRepository):
             return self.get_or_create_light(restaurant_id)
         devices = self._db[self.DEVICES]
         now = datetime.now(timezone.utc)
-        # Update DeviceDocument: light state fields + lastUpdated (per Database Schema Report)
         update: dict[str, Any] = {
             "lightState": state,
             "brightness": brightness,
@@ -283,7 +273,7 @@ class MongoLightRepository(LightRepository):
         }
 
     def add_history(self, restaurant_id: int, action: str) -> None:
-        # LightHistoryDocument: restaurantId (string), deviceId (optional), action, timestamp, legacyId (for API)
+        # light_history collection: restaurantId, deviceId, action, timestamp, legacyId
         device = self._device_for_restaurant_id(restaurant_id)
         now = datetime.now(timezone.utc)
         history_entry: dict[str, Any] = {
@@ -298,11 +288,8 @@ class MongoLightRepository(LightRepository):
 
     def get_history(self, restaurant_id: int | None = None) -> list[dict[str, Any]]:
         history_coll = self._db[self.LIGHT_HISTORY]
-        # Filter by legacyId (API int) when provided; supports both legacyId and legacy restaurant_id field
         if restaurant_id is not None:
-            history_filter: dict[str, Any] = {
-                "$or": [{"legacyId": restaurant_id}, {"restaurant_id": restaurant_id}]
-            }
+            history_filter: dict[str, Any] = {"legacyId": restaurant_id}
         else:
             history_filter = {}
         cursor = history_coll.find(history_filter).sort(
@@ -311,9 +298,7 @@ class MongoLightRepository(LightRepository):
         rows: list[dict[str, Any]] = []
         for index, history_doc in enumerate(cursor):
             event_timestamp = history_doc.get("timestamp")
-            response_restaurant_id = (
-                history_doc.get("legacyId") or history_doc.get("restaurant_id")
-            )
+            response_restaurant_id = history_doc.get("legacyId")
             if response_restaurant_id is None and restaurant_id is not None:
                 response_restaurant_id = restaurant_id
             elif response_restaurant_id is None:
