@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "my-lighting-app",
+    "slug": "my-lighting-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/budderfly_logo.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/budderfly_logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#DEEAD9"
+    },
+    "plugins": [
+      "expo-router"
+    ]
+  }
+}

@@ -6,11 +6,17 @@ __pycache__/
 # Virtual environment
 venv/
 env/
+frontend/node_modules/
+frontend/.expo/
 
 # Certificates, keys, sensitive info
 *.pem
 *.crt
 *.key
+
+# Configuration files
+.pylintrc
+.env.example
 
 # Environment variables
 .env
@@ -23,3 +29,6 @@ Thumbs.db
 .vscode/
 *.swp
 .idea/
+
+# Local backend database
+backend/app/database/lights.db

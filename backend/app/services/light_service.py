@@ -1,0 +1,396 @@
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from datetime import datetime, timezone
+from typing import Any
+
+from app.database.db import get_connection
+from app.database.mongo import get_mongo_db
+from app.models.collections import CollectionNames
+
+# Light state and brightness
+DEFAULT_LIGHT_STATE_OFF = "off"
+DEFAULT_BRIGHTNESS_OFF = 0
+DEFAULT_BRIGHTNESS_ON_PERCENT = 85
+BRIGHTNESS_MIN = 0
+BRIGHTNESS_MAX = 100
+
+# History and pagination
+HISTORY_PAGE_SIZE = 100
+UNKNOWN_LEGACY_ID = 0  # fallback when a history document has no legacyId
+
+# MongoDB sort order
+MONGO_SORT_ASCENDING = 1
+MONGO_SORT_DESCENDING = -1
+
+# Schedule rules: use first rule when deriving schedule_on/schedule_off from Schedules collection
+FIRST_SCHEDULE_RULE_INDEX = 0
+DEFAULT_HOUR = 0
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class LightRepository(ABC):
+    """
+    Repository abstraction to allow a future SQLite -> MongoDB swap
+    without changing route or business logic code.
+    """
+
+    @abstractmethod
+    def get_or_create_light(self, restaurant_id: int) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def update_light(
+        self,
+        restaurant_id: int,
+        state: str,
+        brightness: int,
+        schedule_on: str | None = None,
+        schedule_off: str | None = None,
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def add_history(self, restaurant_id: int, action: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_history(self, restaurant_id: int | None = None) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+
+class SQLiteLightRepository(LightRepository):
+    # MongoDB migration point:
+    # add a MongoLightRepository implementing LightRepository,
+    # then swap dependency wiring in routes/main without changing service logic.
+    def get_or_create_light(self, restaurant_id: int) -> dict[str, Any]:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM restaurant_lights WHERE restaurant_id = ?",
+                (restaurant_id,),
+            )
+            row = cursor.fetchone()
+            if row:
+                return dict(row)
+
+            now = _utc_now_iso()
+            cursor.execute(
+                """
+                INSERT INTO restaurant_lights (
+                    restaurant_id, state, brightness, schedule_on, schedule_off, last_updated
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (restaurant_id, DEFAULT_LIGHT_STATE_OFF, DEFAULT_BRIGHTNESS_OFF, None, None, now),
+            )
+            return {
+                "restaurant_id": restaurant_id,
+                "state": DEFAULT_LIGHT_STATE_OFF,
+                "brightness": DEFAULT_BRIGHTNESS_OFF,
+                "schedule_on": None,
+                "schedule_off": None,
+                "last_updated": now,
+            }
+
+    def update_light(
+        self,
+        restaurant_id: int,
+        state: str,
+        brightness: int,
+        schedule_on: str | None = None,
+        schedule_off: str | None = None,
+    ) -> dict[str, Any]:
+        existing = self.get_or_create_light(restaurant_id)
+        now = _utc_now_iso()
+        next_schedule_on = existing["schedule_on"] if schedule_on is None else schedule_on
+        next_schedule_off = (
+            existing["schedule_off"] if schedule_off is None else schedule_off
+        )
+
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE restaurant_lights
+                SET state = ?, brightness = ?, schedule_on = ?, schedule_off = ?, last_updated = ?
+                WHERE restaurant_id = ?
+                """,
+                (state, brightness, next_schedule_on, next_schedule_off, now, restaurant_id),
+            )
+            return {
+                "restaurant_id": restaurant_id,
+                "state": state,
+                "brightness": brightness,
+                "schedule_on": next_schedule_on,
+                "schedule_off": next_schedule_off,
+                "last_updated": now,
+            }
+
+    def add_history(self, restaurant_id: int, action: str) -> None:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO light_history (restaurant_id, action, timestamp)
+                VALUES (?, ?, ?)
+                """,
+                (restaurant_id, action, _utc_now_iso()),
+            )
+
+    def get_history(self, restaurant_id: int | None = None) -> list[dict[str, Any]]:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            if restaurant_id is None:
+                cursor.execute(
+                    "SELECT * FROM light_history ORDER BY timestamp DESC LIMIT ?",
+                    (HISTORY_PAGE_SIZE,),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT * FROM light_history
+                    WHERE restaurant_id = ?
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                    """,
+                    (restaurant_id, HISTORY_PAGE_SIZE),
+                )
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+
+
+def _datetime_to_iso(value: Any) -> str:
+    """Turn MongoDB date or ISO string into ISO string for placeholder compatibility."""
+    if value is None:
+        return _utc_now_iso()
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+class MongoLightRepository(LightRepository):
+    """
+    Uses your 4 collections (Devices, Schedules, Time_Data, users) plus
+    light_history. Field names match app.models.collections (DeviceDocument, etc.).
+    Converts to placeholder shape for the existing lights API. See docs/SCHEMA_MAPPING.md.
+    """
+    DEVICES = CollectionNames.DEVICES
+    SCHEDULES = CollectionNames.SCHEDULES
+    LIGHT_HISTORY = CollectionNames.LIGHT_HISTORY
+
+    def __init__(self) -> None:
+        self._db = get_mongo_db()
+
+    def _device_for_restaurant_id(self, restaurant_id: int) -> dict[str, Any] | None:
+        devices = self._db[self.DEVICES]
+        # Prefer legacyId (per Database Schema Report), then legacyRestaurantId, then index
+        device_doc = devices.find_one({"legacyId": restaurant_id})
+        if device_doc is not None:
+            return device_doc
+        device_doc = devices.find_one({"legacyRestaurantId": restaurant_id})
+        if device_doc is not None:
+            return device_doc
+        cursor = devices.find().sort("_id", MONGO_SORT_ASCENDING).skip(restaurant_id - 1).limit(1)
+        return next(cursor, None)
+
+    def _placeholder_row_from_device(self, device: dict[str, Any], restaurant_id: int) -> dict[str, Any]:
+        # DeviceDocument placeholder fields: lightState, brightness, scheduleOn, scheduleOff
+        state = device.get("lightState", DEFAULT_LIGHT_STATE_OFF)
+        brightness = int(device.get("brightness", DEFAULT_BRIGHTNESS_OFF))
+        schedule_on = device.get("scheduleOn")
+        schedule_off = device.get("scheduleOff")
+        if schedule_on is None or schedule_off is None:
+            # Derive from Schedules (ScheduleDocument.rules first rule startHour/endHour)
+            schedule_doc = self._schedule_for_device(device)
+            if schedule_doc and schedule_doc.get("rules"):
+                first_rule = schedule_doc["rules"][FIRST_SCHEDULE_RULE_INDEX]
+                schedule_on = schedule_on or f"{first_rule.get('startHour', DEFAULT_HOUR):02d}:00"
+                schedule_off = schedule_off or f"{first_rule.get('endHour', DEFAULT_HOUR):02d}:00"
+        # DeviceDocument.lastUpdated (last light-state change), else updatedAt or status.lastSeen
+        last_updated_raw = (
+            device.get("lastUpdated")
+            or device.get("updatedAt")
+            or (device.get("status") or {}).get("lastSeen")
+        )
+        last_updated = _datetime_to_iso(last_updated_raw)
+        return {
+            "restaurant_id": restaurant_id,
+            "state": state if state in ("on", "off") else DEFAULT_LIGHT_STATE_OFF,
+            "brightness": max(BRIGHTNESS_MIN, min(BRIGHTNESS_MAX, brightness)),
+            "schedule_on": schedule_on,
+            "schedule_off": schedule_off,
+            "last_updated": last_updated,
+        }
+
+    def _schedule_for_device(self, device: dict[str, Any]) -> dict[str, Any] | None:
+        schedules = self._db[self.SCHEDULES]
+        schedule_id = device.get("scheduleId")
+        if schedule_id is not None:
+            return schedules.find_one({"_id": schedule_id})
+        device_id = device.get("_id")
+        if device_id is not None:
+            return schedules.find_one({"deviceId": device_id})
+        return None
+
+    def get_or_create_light(self, restaurant_id: int) -> dict[str, Any]:
+        device = self._device_for_restaurant_id(restaurant_id)
+        if device is None:
+            return {
+                "restaurant_id": restaurant_id,
+                "state": DEFAULT_LIGHT_STATE_OFF,
+                "brightness": DEFAULT_BRIGHTNESS_OFF,
+                "schedule_on": None,
+                "schedule_off": None,
+                "last_updated": _utc_now_iso(),
+            }
+        return self._placeholder_row_from_device(device, restaurant_id)
+
+    def update_light(
+        self,
+        restaurant_id: int,
+        state: str,
+        brightness: int,
+        schedule_on: str | None = None,
+        schedule_off: str | None = None,
+    ) -> dict[str, Any]:
+        device = self._device_for_restaurant_id(restaurant_id)
+        if device is None:
+            return self.get_or_create_light(restaurant_id)
+        devices = self._db[self.DEVICES]
+        now = datetime.now(timezone.utc)
+        # Update DeviceDocument: light state fields + lastUpdated (per Database Schema Report)
+        update: dict[str, Any] = {
+            "lightState": state,
+            "brightness": brightness,
+            "lastUpdated": now.isoformat(),
+            "updatedAt": now,
+        }
+        if schedule_on is not None:
+            update["scheduleOn"] = schedule_on
+        if schedule_off is not None:
+            update["scheduleOff"] = schedule_off
+        devices.update_one({"_id": device["_id"]}, {"$set": update})
+        return {
+            "restaurant_id": restaurant_id,
+            "state": state,
+            "brightness": brightness,
+            "schedule_on": schedule_on or device.get("scheduleOn"),
+            "schedule_off": schedule_off or device.get("scheduleOff"),
+            "last_updated": now.isoformat(),
+        }
+
+    def add_history(self, restaurant_id: int, action: str) -> None:
+        # LightHistoryDocument: restaurantId (string), deviceId (optional), action, timestamp, legacyId (for API)
+        device = self._device_for_restaurant_id(restaurant_id)
+        now = datetime.now(timezone.utc)
+        history_entry: dict[str, Any] = {
+            "restaurantId": device["restaurantId"] if device else str(restaurant_id),
+            "action": action,
+            "timestamp": now.isoformat(),
+            "legacyId": restaurant_id,
+        }
+        if device:
+            history_entry["deviceId"] = device["_id"]
+        self._db[self.LIGHT_HISTORY].insert_one(history_entry)
+
+    def get_history(self, restaurant_id: int | None = None) -> list[dict[str, Any]]:
+        history_coll = self._db[self.LIGHT_HISTORY]
+        # Filter by legacyId (API int) when provided; supports both legacyId and legacy restaurant_id field
+        if restaurant_id is not None:
+            history_filter: dict[str, Any] = {
+                "$or": [{"legacyId": restaurant_id}, {"restaurant_id": restaurant_id}]
+            }
+        else:
+            history_filter = {}
+        cursor = history_coll.find(history_filter).sort(
+            "timestamp", MONGO_SORT_DESCENDING
+        ).limit(HISTORY_PAGE_SIZE)
+        rows: list[dict[str, Any]] = []
+        for index, history_doc in enumerate(cursor):
+            event_timestamp = history_doc.get("timestamp")
+            response_restaurant_id = (
+                history_doc.get("legacyId") or history_doc.get("restaurant_id")
+            )
+            if response_restaurant_id is None and restaurant_id is not None:
+                response_restaurant_id = restaurant_id
+            elif response_restaurant_id is None:
+                response_restaurant_id = UNKNOWN_LEGACY_ID
+            rows.append({
+                "id": index + 1,
+                "restaurant_id": response_restaurant_id,
+                "action": history_doc["action"],
+                "timestamp": _datetime_to_iso(event_timestamp) if event_timestamp else "",
+            })
+        return rows
+
+
+class LightService:
+    def __init__(self, repository: LightRepository) -> None:
+        self.repository = repository
+
+    def get_status(self, restaurant_id: int) -> dict[str, Any]:
+        row = self.repository.get_or_create_light(restaurant_id)
+        return self._to_status_response(row)
+
+    def toggle_light(self, restaurant_id: int) -> dict[str, Any]:
+        current = self.repository.get_or_create_light(restaurant_id)
+        if current["state"] == DEFAULT_LIGHT_STATE_OFF:
+            next_state = "on"
+            next_brightness = (
+                current["brightness"]
+                if current["brightness"] > BRIGHTNESS_MIN
+                else DEFAULT_BRIGHTNESS_ON_PERCENT
+            )
+            action = "toggle_on"
+        else:
+            next_state = DEFAULT_LIGHT_STATE_OFF
+            next_brightness = DEFAULT_BRIGHTNESS_OFF
+            action = "toggle_off"
+
+        updated = self.repository.update_light(
+            restaurant_id=restaurant_id,
+            state=next_state,
+            brightness=next_brightness,
+        )
+        self.repository.add_history(restaurant_id, action)
+        return self._to_status_response(updated)
+
+    def schedule_light(
+        self, restaurant_id: int, schedule_on: str, schedule_off: str
+    ) -> dict[str, Any]:
+        current = self.repository.get_or_create_light(restaurant_id)
+        updated = self.repository.update_light(
+            restaurant_id=restaurant_id,
+            state=current["state"],
+            brightness=current["brightness"],
+            schedule_on=schedule_on,
+            schedule_off=schedule_off,
+        )
+        self.repository.add_history(
+            restaurant_id, f"schedule_set_{schedule_on}_{schedule_off}"
+        )
+        return self._to_status_response(updated)
+
+    def get_history(self, restaurant_id: int | None = None) -> list[dict[str, Any]]:
+        rows = self.repository.get_history(restaurant_id)
+        return [
+            {
+                "id": row["id"],
+                "restaurantId": row["restaurant_id"],
+                "action": row["action"],
+                "timestamp": row["timestamp"],
+            }
+            for row in rows
+        ]
+
+    @staticmethod
+    def _to_status_response(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "restaurantId": row["restaurant_id"],
+            "state": row["state"],
+            "brightness": row["brightness"],
+            "lastUpdated": row["last_updated"],
+        }
