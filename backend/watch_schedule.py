@@ -7,8 +7,11 @@ Defaults to restaurant_id=1 if not specified.
 import time
 import os
 import sys
+from dotenv import load_dotenv
 from app.database.mongo import get_mongo_db
 
+# Load environment variables from .env file
+load_dotenv()
 
 def clear_screen():
     """Clear terminal screen (works on Windows/Mac/Linux)"""
@@ -28,7 +31,14 @@ def main():
             print(f"Error: Invalid restaurant_id '{sys.argv[1]}'. Using default 1.")
     
     # Connect to database
-    db = get_mongo_db()
+    try:
+        db = get_mongo_db()
+    except RuntimeError as e:
+        print(f"Error: {e}")
+        print("\nMake sure you have a .env file in the backend directory with:")
+        print("MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/SD_IoT")
+        print("MONGODB_DB_NAME=SD_IoT")
+        sys.exit(1)
     
     # Find the device for this restaurant
     device = db.Devices.find_one({"legacyId": restaurant_id})
