@@ -14,6 +14,21 @@ type BackendHistory = {
   timestamp: string;
 };
 
+type ScheduleRule = {
+  days: string[];
+  startTime: string;
+  endTime: string;
+  enabled: boolean;
+};
+
+type FullSchedule = {
+  deviceId?: string;
+  restaurantId?: string;
+  rules: ScheduleRule[];
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 type LightingContextType = {
   isOn: boolean;
   brightness: number;
@@ -25,6 +40,9 @@ type LightingContextType = {
   refreshStatus: () => Promise<void>;
   refreshHistory: () => Promise<void>;
   saveSchedule: (scheduleOn: string, scheduleOff: string) => Promise<void>;
+  // New methods for full schedule support
+  saveFullSchedule: (rules: ScheduleRule[]) => Promise<FullSchedule>;
+  loadFullSchedule: () => Promise<FullSchedule | null>;
 };
 
 const LightingContext = createContext<LightingContextType | undefined>(undefined);
@@ -113,6 +131,49 @@ export const LightingProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  // New method: Save full day-specific schedule
+  const saveFullSchedule = async (rules: ScheduleRule[]): Promise<FullSchedule> => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${baseUrl}/lights/schedule/full`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          restaurantId: RESTAURANT_ID,
+          rules: rules,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`Full schedule request failed (${response.status})`);
+      }
+      const body = (await response.json()) as FullSchedule;
+      return body;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown full schedule error");
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // New method: Load full day-specific schedule
+  const loadFullSchedule = async (): Promise<FullSchedule | null> => {
+    try {
+      const response = await fetch(`${baseUrl}/lights/schedule/full?restaurantId=${RESTAURANT_ID}`);
+      if (!response.ok) {
+        if (response.status === 404) {
+          return null; // No schedule found
+        }
+        throw new Error(`Load schedule request failed (${response.status})`);
+      }
+      return (await response.json()) as FullSchedule;
+    } catch (err) {
+      console.error("Failed to load schedule:", err);
+      return null;
+    }
+  };
+
   useEffect(() => {
     let mounted = true;
     const load = async () => {
@@ -149,6 +210,8 @@ export const LightingProvider = ({ children }: { children: ReactNode }) => {
         refreshStatus,
         refreshHistory,
         saveSchedule,
+        saveFullSchedule,
+        loadFullSchedule,
       }}
     >
       {children}

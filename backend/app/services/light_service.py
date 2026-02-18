@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 from app.database.db import get_connection
 from app.database.mongo import get_mongo_db
@@ -30,6 +30,15 @@ DEFAULT_HOUR = 0
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _datetime_to_iso(value: Any) -> str:
+    """Turn MongoDB date or ISO string into ISO string."""
+    if value is None:
+        return _utc_now_iso()
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
 
 
 class LightRepository(ABC):
@@ -61,9 +70,21 @@ class LightRepository(ABC):
     def get_history(self, restaurant_id: int | None = None) -> list[dict[str, Any]]:
         raise NotImplementedError
 
+    # New abstract methods for full schedule management
+    @abstractmethod
+    def save_full_schedule(self, restaurant_id: int, rules: list[dict[str, Any]]) -> dict[str, Any]:
+        """Save day-specific schedule rules to Schedules collection"""
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_full_schedule(self, restaurant_id: int) -> dict[str, Any]:
+        """Get day-specific schedule rules from Schedules collection"""
+        raise NotImplementedError
+
 
 class SQLiteLightRepository(LightRepository):
     """SQLite backend when MONGODB_URI is not set."""
+    
     def get_or_create_light(self, restaurant_id: int) -> dict[str, Any]:
         with get_connection() as conn:
             cursor = conn.cursor()
@@ -158,15 +179,15 @@ class SQLiteLightRepository(LightRepository):
                 )
             rows = cursor.fetchall()
             return [dict(row) for row in rows]
+              
+    def save_full_schedule(self, restaurant_id: int, rules: list[dict[str, Any]]) -> dict[str, Any]:
+        """SQLite version - not implemented, return simple format"""
+        return {"restaurant_id": restaurant_id, "rules": rules, "note": "SQLite does not support day-specific schedules"}
 
+    def get_full_schedule(self, restaurant_id: int) -> dict[str, Any]:
+        """SQLite version - return empty rules"""
+        return {"restaurant_id": restaurant_id, "rules": []}
 
-def _datetime_to_iso(value: Any) -> str:
-    """Turn MongoDB date or ISO string into ISO string."""
-    if value is None:
-        return _utc_now_iso()
-    if hasattr(value, "isoformat"):
-        return value.isoformat()
-    return str(value)
 
 
 class MongoLightRepository(LightRepository):
@@ -311,6 +332,92 @@ class MongoLightRepository(LightRepository):
             })
         return rows
 
+    # New methods for full schedule management
+    def save_full_schedule(self, restaurant_id: int, rules: list[dict[str, Any]]) -> dict[str, Any]:
+        """Save day-specific schedule rules to Schedules collection"""
+        # First get the device
+        device = self._device_for_restaurant_id(restaurant_id)
+        if not device:
+            raise ValueError(f"Device with legacyId {restaurant_id} not found")
+        
+        schedules = self._db[self.SCHEDULES]
+        now = datetime.now(timezone.utc)
+        
+        # Check if schedule already exists
+        existing = schedules.find_one({"deviceId": device["_id"]})
+        
+        # Format rules for storage (convert times to 24h format if needed)
+        formatted_rules = []
+        for rule in rules:
+            formatted_rule = {
+                "days": rule.get("days", []),
+                "startHour": int(rule.get("startTime", "00:00").split(":")[0]),
+                "endHour": int(rule.get("endTime", "00:00").split(":")[0]),
+                "startMinute": int(rule.get("startTime", "00:00").split(":")[1]),
+                "endMinute": int(rule.get("endTime", "00:00").split(":")[1]),
+                "action": "ON",
+                "enabled": rule.get("enabled", True)
+            }
+            formatted_rules.append(formatted_rule)
+        
+        schedule_data = {
+            "deviceId": device["_id"],
+            "restaurantId": device.get("restaurantId"),
+            "restaurant": device.get("restaurant"),
+            "rules": formatted_rules,
+            "updatedAt": now
+        }
+        
+        if existing:
+            schedules.update_one({"_id": existing["_id"]}, {"$set": schedule_data})
+            schedule_data["_id"] = str(existing["_id"])
+        else:
+            schedule_data["createdAt"] = now
+            result = schedules.insert_one(schedule_data)
+            schedule_data["_id"] = str(result.inserted_id)
+        
+        # Add to history
+        self.add_history(restaurant_id, f"schedule_updated")
+        
+        # Convert back to response format
+        return self.get_full_schedule(restaurant_id)
+
+    def get_full_schedule(self, restaurant_id: int) -> dict[str, Any]:
+        """Get day-specific schedule rules from Schedules collection"""
+        device = self._device_for_restaurant_id(restaurant_id)
+        if not device:
+            return {"deviceId": None, "rules": []}
+        
+        schedules = self._db[self.SCHEDULES]
+        schedule = schedules.find_one({"deviceId": device["_id"]})
+        
+        if not schedule:
+            return {
+                "deviceId": device["_id"],
+                "restaurantId": device.get("restaurantId"),
+                "rules": []
+            }
+        
+        # Convert from storage format to response format
+        rules_response = []
+        for rule in schedule.get("rules", []):
+            start_time = f"{rule.get('startHour', 0):02d}:{rule.get('startMinute', 0):02d}"
+            end_time = f"{rule.get('endHour', 0):02d}:{rule.get('endMinute', 0):02d}"
+            rules_response.append({
+                "days": rule.get("days", []),
+                "startTime": start_time,
+                "endTime": end_time,
+                "enabled": rule.get("enabled", True)
+            })
+        
+        return {
+            "deviceId": schedule["deviceId"],
+            "restaurantId": schedule.get("restaurantId"),
+            "rules": rules_response,
+            "createdAt": _datetime_to_iso(schedule.get("createdAt")),
+            "updatedAt": _datetime_to_iso(schedule.get("updatedAt"))
+        }
+
 
 class LightService:
     def __init__(self, repository: LightRepository) -> None:
@@ -358,6 +465,15 @@ class LightService:
             restaurant_id, f"schedule_set_{schedule_on}_{schedule_off}"
         )
         return self._to_status_response(updated)
+
+    # New methods for full schedule management
+    def set_full_schedule(self, restaurant_id: int, rules: list[dict[str, Any]]) -> dict[str, Any]:
+        """Save day-specific schedule rules"""
+        return self.repository.save_full_schedule(restaurant_id, rules)
+
+    def get_full_schedule(self, restaurant_id: int) -> dict[str, Any]:
+        """Get day-specific schedule rules"""
+        return self.repository.get_full_schedule(restaurant_id)
 
     def get_history(self, restaurant_id: int | None = None) -> list[dict[str, Any]]:
         rows = self.repository.get_history(restaurant_id)

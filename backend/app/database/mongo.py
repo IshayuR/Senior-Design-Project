@@ -9,10 +9,6 @@ from typing import TYPE_CHECKING
 from pymongo import MongoClient
 from pymongo.database import Database
 
-if TYPE_CHECKING:
-    pass
-
-# e.g. mongodb+srv://user:pass@cluster0.xxxxx.mongodb.net/SD_IoT
 MONGODB_URI = os.getenv("MONGODB_URI", "")
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "SD_IoT")
 

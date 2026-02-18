@@ -1,4 +1,5 @@
 import os
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -7,6 +8,8 @@ from app.models.light import (
     LightStatusResponse,
     ScheduleLightRequest,
     ToggleLightRequest,
+    FullScheduleRequest,
+    FullScheduleResponse,
 )
 from app.services.light_service import LightService, MongoLightRepository, SQLiteLightRepository
 
@@ -33,11 +36,27 @@ def toggle_light(payload: ToggleLightRequest) -> dict:
 
 @router.post("/schedule", response_model=LightStatusResponse)
 def schedule_light(payload: ScheduleLightRequest) -> dict:
+    """Legacy endpoint: sets a simple schedule (same time every day)"""
     return service.schedule_light(
         restaurant_id=payload.restaurantId,
         schedule_on=payload.scheduleOn,
         schedule_off=payload.scheduleOff,
     )
+
+
+@router.post("/schedule/full", response_model=FullScheduleResponse)
+def set_full_schedule(payload: FullScheduleRequest) -> dict:
+    """Save day-specific schedule rules to Schedules collection"""
+    return service.set_full_schedule(
+        restaurant_id=payload.restaurantId,
+        rules=[rule.dict() for rule in payload.rules]
+    )
+
+
+@router.get("/schedule/full", response_model=FullScheduleResponse)
+def get_full_schedule(restaurantId: int = Query(..., ge=1)) -> dict:
+    """Get day-specific schedule rules from Schedules collection"""
+    return service.get_full_schedule(restaurantId)
 
 
 @router.get("/history", response_model=list[LightHistoryItem])
