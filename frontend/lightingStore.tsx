@@ -43,6 +43,7 @@ type LightingContextType = {
   // New methods for full schedule support
   saveFullSchedule: (rules: ScheduleRule[]) => Promise<FullSchedule>;
   loadFullSchedule: () => Promise<FullSchedule | null>;
+  restaurantId: number;
 };
 
 const LightingContext = createContext<LightingContextType | undefined>(undefined);
@@ -212,6 +213,7 @@ export const LightingProvider = ({ children }: { children: ReactNode }) => {
         saveSchedule,
         saveFullSchedule,
         loadFullSchedule,
+        restaurantId: RESTAURANT_ID,
       }}
     >
       {children}
