@@ -332,7 +332,6 @@ class MongoLightRepository(LightRepository):
             })
         return rows
 
-    # New methods for full schedule management
     def save_full_schedule(self, restaurant_id: int, rules: list[dict[str, Any]]) -> dict[str, Any]:
         """Save day-specific schedule rules to Schedules collection"""
         # First get the device
@@ -343,22 +342,28 @@ class MongoLightRepository(LightRepository):
         schedules = self._db[self.SCHEDULES]
         now = datetime.now(timezone.utc)
         
+        # Group rules by start/end time to match database format
+        time_groups = {}
+        for rule in rules:
+            if rule.get("enabled", True):  # Only group enabled rules
+                key = f"{rule['startTime']}-{rule['endTime']}"
+                if key not in time_groups:
+                    time_groups[key] = {
+                        "days": [],
+                        "startHour": int(rule["startTime"].split(":")[0]),
+                        "startMinute": int(rule["startTime"].split(":")[1]),
+                        "endHour": int(rule["endTime"].split(":")[0]),
+                        "endMinute": int(rule["endTime"].split(":")[1]),
+                        "action": "ON",
+                        "enabled": True
+                    }
+                time_groups[key]["days"].extend(rule["days"])
+        
+        # Convert grouped rules to list
+        formatted_rules = list(time_groups.values())
+        
         # Check if schedule already exists
         existing = schedules.find_one({"deviceId": device["_id"]})
-        
-        # Format rules for storage (convert times to 24h format if needed)
-        formatted_rules = []
-        for rule in rules:
-            formatted_rule = {
-                "days": rule.get("days", []),
-                "startHour": int(rule.get("startTime", "00:00").split(":")[0]),
-                "endHour": int(rule.get("endTime", "00:00").split(":")[0]),
-                "startMinute": int(rule.get("startTime", "00:00").split(":")[1]),
-                "endMinute": int(rule.get("endTime", "00:00").split(":")[1]),
-                "action": "ON",
-                "enabled": rule.get("enabled", True)
-            }
-            formatted_rules.append(formatted_rule)
         
         schedule_data = {
             "deviceId": device["_id"],
