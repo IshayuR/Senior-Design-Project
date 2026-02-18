@@ -15,38 +15,38 @@ The backend provides API endpoints, MQTT integration, and state management for s
 
 ## Technologies
 
-- **AWS IoT Core** (MQTT Broker for device communication)
-- **Python (Flask / FastAPI)** for backend REST API and MQTT publishing
-- **paho-mqtt** for Python-based MQTT connectivity
-- **SQLite or PostgreSQL** (mock database for lighting state)
-- **Git** for code management and collaboration
+- AWS IoT Core (MQTT Broker for device communication)
+- Python (Flask / FastAPI) for backend REST API and MQTT publishing
+- paho-mqtt for Python-based MQTT connectivity
+- SQLite or PostgreSQL (mock database for lighting state)
+- Git for code management and collaboration
 
 ## Key Files
 
-- `main.py`: Main backend service
-- `.gitignore`: Excludes sensitive files and local environments (see below)
-- `requirements.txt`: Python dependencies (e.g., paho-mqtt, Flask)
-- `README.md`: Project documentation
+- **main.py:** Main backend service
+- **.gitignore:** Excludes sensitive files and local environments (see below)
+- **requirements.txt:** Python dependencies (e.g., paho-mqtt, Flask)
+- **README.md:** Project documentation
 
 ## Security
 
-- **Certificates/keys are never committed**; always handled via `.gitignore`
-- Environment variables (`.env`) recommended for AWS credentials and configuration
+- Certificates/keys are never committed; always handled via .gitignore
+- Environment variables (.env) recommended for AWS credentials and configuration
 
 ## Setup Instructions
 
 1. Clone this repository.
 2. Create a Python virtual environment (`python3 -m venv venv`).
-3. Install dependencies from `requirements.txt`.
+3. Install dependencies from requirements.txt.
 4. Ensure the following files are present (but NOT tracked by Git):
-    - AWS IoT certificate, private key, and CA (see `.gitignore`).
-5. Configure connection parameters in `main.py` or via environment variables.
+   - AWS IoT certificate, private key, and CA (see .gitignore).
+5. Configure connection parameters in main.py or via environment variables.
 6. Launch backend service and test cloud connection (see usage in code comments).
 
 ## References
 
-See `Works Cited` in the project report for architecture, MQTT, and IoT resource documentation.
+See Works Cited in the project report for architecture, MQTT, and IoT resource documentation.
 
 ---
 
-Designed and maintained by the CSE team, University of Connecticut. Project sponsored by Budderfly.
+*Designed and maintained by the CSE team, University of Connecticut. Project sponsored by Budderfly.*
