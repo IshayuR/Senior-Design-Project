@@ -333,7 +333,7 @@ class MongoLightRepository(LightRepository):
         return rows
 
     def save_full_schedule(self, restaurant_id: int, rules: list[dict[str, Any]]) -> dict[str, Any]:
-        """Save day-specific schedule rules to Schedules collection"""
+        """Save day-specific schedule rules to Schedules collection - one rule per day"""
         # First get the device
         device = self._device_for_restaurant_id(restaurant_id)
         if not device:
@@ -342,25 +342,20 @@ class MongoLightRepository(LightRepository):
         schedules = self._db[self.SCHEDULES]
         now = datetime.now(timezone.utc)
         
-        # Group rules by start/end time to match database format
-        time_groups = {}
+        # Format each rule individually - one per day
+        formatted_rules = []
         for rule in rules:
-            if rule.get("enabled", True):  # Only group enabled rules
-                key = f"{rule['startTime']}-{rule['endTime']}"
-                if key not in time_groups:
-                    time_groups[key] = {
-                        "days": [],
-                        "startHour": int(rule["startTime"].split(":")[0]),
-                        "startMinute": int(rule["startTime"].split(":")[1]),
-                        "endHour": int(rule["endTime"].split(":")[0]),
-                        "endMinute": int(rule["endTime"].split(":")[1]),
-                        "action": "ON",
-                        "enabled": True
-                    }
-                time_groups[key]["days"].extend(rule["days"])
-        
-        # Convert grouped rules to list
-        formatted_rules = list(time_groups.values())
+            # Each rule should have exactly one day (from your frontend)
+            formatted_rule = {
+                "days": rule.get("days", []),  # Should be a single-day array like ["MON"]
+                "startHour": int(rule.get("startTime", "00:00").split(":")[0]),
+                "endHour": int(rule.get("endTime", "00:00").split(":")[0]),
+                "startMinute": int(rule.get("startTime", "00:00").split(":")[1]),
+                "endMinute": int(rule.get("endTime", "00:00").split(":")[1]),
+                "action": "ON",
+                "enabled": rule.get("enabled", True)
+            }
+            formatted_rules.append(formatted_rule)
         
         # Check if schedule already exists
         existing = schedules.find_one({"deviceId": device["_id"]})
@@ -403,13 +398,13 @@ class MongoLightRepository(LightRepository):
                 "rules": []
             }
         
-        # Convert from storage format to response format
+        # Convert from storage format to response format - keep individual days
         rules_response = []
         for rule in schedule.get("rules", []):
             start_time = f"{rule.get('startHour', 0):02d}:{rule.get('startMinute', 0):02d}"
             end_time = f"{rule.get('endHour', 0):02d}:{rule.get('endMinute', 0):02d}"
             rules_response.append({
-                "days": rule.get("days", []),
+                "days": rule.get("days", []),  # Keep the days array
                 "startTime": start_time,
                 "endTime": end_time,
                 "enabled": rule.get("enabled", True)
