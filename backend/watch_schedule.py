@@ -141,7 +141,7 @@ def main():
             print(f"Refreshing every 2 seconds | {time.strftime('%Y-%m-%d %H:%M:%S')}")
             print("=" * 60)
             
-            time.sleep(2)
+            time.sleep(10)
             
     except KeyboardInterrupt:
         print("\n\nMonitoring stopped")
