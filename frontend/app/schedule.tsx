@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert } from "react-native";
 import BottomNav from "./BottomNav";
 import { useLighting } from "../lightingStore";
@@ -25,7 +25,38 @@ const initialDays: DaySchedule[] = [
 
 export default function ScheduleScreen() {
   const [days, setDays] = useState<DaySchedule[]>(initialDays);
-  const { saveSchedule, loading } = useLighting();
+  const { saveFullSchedule, loadFullSchedule, loading, restaurantId } = useLighting();
+
+  // Load saved schedule when screen opens
+  useEffect(() => {
+    const loadSchedule = async () => {
+      try {
+        const savedSchedule = await loadFullSchedule();
+        if (savedSchedule && savedSchedule.rules && savedSchedule.rules.length > 0) {
+          // Convert backend rules back to UI format
+          const updatedDays = days.map(day => {
+            // Find rule for this day (simplified - you may need better day mapping)
+            const ruleForDay = savedSchedule.rules.find((r: any) => 
+              r.days.includes(day.label)
+            );
+            if (ruleForDay) {
+              return {
+                ...day,
+                enabled: ruleForDay.enabled !== false,
+                start: ruleForDay.startTime,
+                stop: ruleForDay.endTime
+              };
+            }
+            return day;
+          });
+          setDays(updatedDays);
+        }
+      } catch (err) {
+        console.log("No saved schedule found or error loading:", err);
+      }
+    };
+    loadSchedule();
+  }, []);
 
   const toggleDay = (id: string) => {
     setDays((prev) => prev.map((d) => (d.id === id ? { ...d, enabled: !d.enabled } : d)));
@@ -36,10 +67,17 @@ export default function ScheduleScreen() {
   };
 
   const onApplySchedule = async () => {
-    const active = days.find((d) => d.enabled) ?? days[0];
     try {
-      await saveSchedule(active.start, active.stop);
-      Alert.alert("Saved", `Backend schedule updated (${active.start} -> ${active.stop}).`);
+      // Convert UI days to backend format
+      const rules = days.map(day => ({
+        days: [day.label], // Each day gets its own rule
+        startTime: day.start,
+        endTime: day.stop,
+        enabled: day.enabled
+      }));
+
+      await saveFullSchedule(rules);
+      Alert.alert("Success", "Schedule saved for all days!");
     } catch (err) {
       Alert.alert("Error", err instanceof Error ? err.message : "Failed to save schedule");
     }

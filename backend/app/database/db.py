@@ -9,6 +9,11 @@ from typing import Iterator
 DEFAULT_DB_PATH = Path(__file__).resolve().parent / "lights.db"
 DB_PATH = Path(os.getenv("LIGHTS_DB_PATH", str(DEFAULT_DB_PATH)))
 
+# Seed row for SQLite placeholder: one default restaurant light
+SEED_RESTAURANT_ID = 1
+SEED_INITIAL_STATE = "off"
+SEED_INITIAL_BRIGHTNESS = 0
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -57,5 +62,5 @@ def init_db() -> None:
                 restaurant_id, state, brightness, schedule_on, schedule_off, last_updated
             ) VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (1, "off", 0, None, None, _utc_now_iso()),
+            (SEED_RESTAURANT_ID, SEED_INITIAL_STATE, SEED_INITIAL_BRIGHTNESS, None, None, _utc_now_iso()),
         )
