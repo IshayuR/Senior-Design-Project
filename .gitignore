@@ -1,0 +1,29 @@
+# Env and secrets
+.env
+.env.local
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.db
+
+# Node / Expo
+node_modules/
+.expo/
+dist/
+npm-debug.log*
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Nested .git (old sub-repos) - uncomment if you want one repo history only
+# backend/.git
+# frontend/.git
+# device-gateway/.git
+# archive/**/.git
