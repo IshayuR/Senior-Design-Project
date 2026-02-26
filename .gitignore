@@ -6,6 +6,8 @@ __pycache__/
 # Virtual environment
 venv/
 env/
+frontend/node_modules/
+frontend/.expo/
 
 # Certificates, keys, sensitive info
 *.pem
@@ -23,3 +25,6 @@ Thumbs.db
 .vscode/
 *.swp
 .idea/
+
+# Local backend database
+backend/app/database/lights.db
