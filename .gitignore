@@ -28,3 +28,4 @@ Thumbs.db
 
 # Local backend database
 backend/app/database/lights.db
+.expo/

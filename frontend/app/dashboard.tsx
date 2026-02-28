@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, Pressable } from "react-native";
+import { View, Text, StyleSheet, Pressable, Alert } from "react-native";
 import { useRouter } from "expo-router";
 import { useLighting } from "../lightingStore";
 import BottomNav from "./BottomNav";
@@ -18,7 +18,19 @@ export default function DashboardScreen() {
       <View style={styles.mainCard}>
         <Text style={styles.restaurantLabel}>name_restaurant status</Text>
 
-        <Pressable style={styles.bulbWrapper} onPress={() => void toggleLight()}>
+        <Pressable
+          style={styles.bulbWrapper}
+          onPress={async () => {
+            try {
+              await toggleLight();
+            } catch {
+              Alert.alert(
+                "Connection error",
+                "Could not reach the lighting server. Make sure the backend is running (uvicorn on port 8000) and, if using a physical device or Android emulator, set EXPO_PUBLIC_API_BASE_URL in frontend/.env to your machine's IP (e.g. http://192.168.1.x:8000 for device, http://10.0.2.2:8000 for Android emulator)."
+              );
+            }
+          }}
+        >
           {isOn && (
             <>
               <View style={[styles.ray, styles.rayTop]} />
