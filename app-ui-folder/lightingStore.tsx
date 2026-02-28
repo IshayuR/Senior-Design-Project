@@ -1,88 +1,155 @@
-// lightingStore.tsx
-import React, {
-  createContext,
-  useContext,
-  useState,
-  ReactNode,
-} from "react";
+import React, { createContext, ReactNode, useContext, useEffect, useMemo, useState } from "react";
 
-type HistoryEntry = {
+type BackendStatus = {
+  restaurantId: number;
+  state: "on" | "off";
+  brightness: number;
+  lastUpdated: string;
+};
+
+type BackendHistory = {
   id: number;
+  restaurantId: number;
+  action: string;
   timestamp: string;
-  date: string;          // 👈 NEW
-  status: "on" | "off";
 };
 
 type LightingContextType = {
   isOn: boolean;
-  history: HistoryEntry[];
-  toggleLight: () => void;
-  clearHistory: () => void;
+  brightness: number;
+  lastUpdated: string;
+  history: BackendHistory[];
+  loading: boolean;
+  error: string | null;
+  toggleLight: () => Promise<void>;
+  refreshStatus: () => Promise<void>;
+  refreshHistory: () => Promise<void>;
+  saveSchedule: (scheduleOn: string, scheduleOff: string) => Promise<void>;
 };
 
-const LightingContext = createContext<LightingContextType | undefined>(
-  undefined
-);
+const LightingContext = createContext<LightingContextType | undefined>(undefined);
+
+const RESTAURANT_ID = 1;
 
 export const LightingProvider = ({ children }: { children: ReactNode }) => {
-  const [isOn, setIsOn] = useState(false);
-  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const baseUrl = useMemo(
+    () => (process.env.EXPO_PUBLIC_API_BASE_URL || "http://localhost:8000").replace(/\/+$/, ""),
+    []
+  );
 
-  const addHistoryEntry = (next: boolean) => {
-    const now = new Date();
+  const [status, setStatus] = useState<BackendStatus | null>(null);
+  const [history, setHistory] = useState<BackendHistory[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-    const timeString = now.toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-    });
-
-    const dateString = now.toLocaleDateString("en-US", {
-      month: "short",   // e.g., "Nov"
-      day: "numeric",   // e.g., "24"
-      year: "numeric",  // e.g., "2025"
-    });
-
-    const entry: HistoryEntry = {
-      id: now.getTime(),
-      timestamp: timeString,
-      date: dateString,          // 👈 NEW
-      status: next ? "on" : "off",
-    };
-
-    setHistory((prev) => [entry, ...prev]); // newest first
+  const refreshStatus = async () => {
+    const response = await fetch(`${baseUrl}/lights/status?restaurantId=${RESTAURANT_ID}`);
+    if (!response.ok) {
+      throw new Error(`Status request failed (${response.status})`);
+    }
+    const body = (await response.json()) as BackendStatus;
+    setStatus(body);
   };
 
-  const sendSignalToBackend = async (nextState: boolean) => {
+  const refreshHistory = async () => {
+    const response = await fetch(`${baseUrl}/lights/history?restaurantId=${RESTAURANT_ID}`);
+    if (!response.ok) {
+      throw new Error(`History request failed (${response.status})`);
+    }
+    const body = (await response.json()) as BackendHistory[];
+    setHistory(body);
+  };
+
+  const toggleLight = async () => {
+    setLoading(true);
+    setError(null);
     try {
-      const response = await fetch("http://127.0.0.1:5000/light", {
+      const response = await fetch(`${baseUrl}/lights/toggle`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ state: nextState ? "on" : "off" }),
+        body: JSON.stringify({
+          restaurantId: RESTAURANT_ID,
+          action: "toggle",
+        }),
       });
-
-      console.log("Backend response:", await response.json());
+      if (!response.ok) {
+        throw new Error(`Toggle request failed (${response.status})`);
+      }
+      const body = (await response.json()) as BackendStatus;
+      setStatus(body);
+      await refreshHistory();
     } catch (err) {
-      console.error("Failed to send signal:", err);
+      setError(err instanceof Error ? err.message : "Unknown toggle error");
+      throw err;
+    } finally {
+      setLoading(false);
     }
   };
 
-
-  const toggleLight = () => {
-    setIsOn((prev) => {
-      const next = !prev;
-      sendSignalToBackend(next);
-      addHistoryEntry(next);
-      return next;
-    });
+  const saveSchedule = async (scheduleOn: string, scheduleOff: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${baseUrl}/lights/schedule`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          restaurantId: RESTAURANT_ID,
+          scheduleOn,
+          scheduleOff,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`Schedule request failed (${response.status})`);
+      }
+      const body = (await response.json()) as BackendStatus;
+      setStatus(body);
+      await refreshHistory();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown schedule error");
+      throw err;
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const clearHistory = () => {
-    setHistory([]);
-  };
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        await Promise.all([refreshStatus(), refreshHistory()]);
+      } catch (err) {
+        if (mounted) {
+          setError(err instanceof Error ? err.message : "Failed to load lighting data");
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    };
+    void load();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   return (
     <LightingContext.Provider
-      value={{ isOn, history, toggleLight, clearHistory }}
+      value={{
+        isOn: status?.state === "on",
+        brightness: status?.brightness ?? 0,
+        lastUpdated: status?.lastUpdated ?? "",
+        history,
+        loading,
+        error,
+        toggleLight,
+        refreshStatus,
+        refreshHistory,
+        saveSchedule,
+      }}
     >
       {children}
     </LightingContext.Provider>
