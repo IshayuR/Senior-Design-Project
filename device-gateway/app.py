@@ -1,4 +1,4 @@
-"""Flask app: POST /light receives state and publishes to MQTT."""
+"""Flask app: POST /light receives state and publishes to MQTT; cron scheduler applies light schedule."""
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
@@ -21,4 +21,8 @@ def control_light():
 
 
 def run(host: str = "0.0.0.0", port: int = 5000) -> None:
+    import os
+    if os.getenv("DISABLE_SCHEDULER", "").lower() not in ("1", "true", "yes"):
+        from scheduler import start_scheduler
+        start_scheduler()
     app.run(host=host, port=port)
