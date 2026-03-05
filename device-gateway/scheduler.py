@@ -3,7 +3,6 @@ from datetime import datetime
 
 import requests
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
 
 from config import BACKEND_URL, RESTAURANT_ID, SCHEDULER_CRON_HOUR, SCHEDULER_CRON_MINUTE
 
@@ -58,10 +57,9 @@ def start_scheduler() -> None:
     # Cron: default "* * * * *" = every minute; override via SCHEDULER_CRON_* env
     _scheduler.add_job(
         _apply_schedule_job,
-        trigger=CronTrigger(
-            minute=SCHEDULER_CRON_MINUTE,
-            hour=SCHEDULER_CRON_HOUR,
-        ),
+        trigger="cron",
+        minute=SCHEDULER_CRON_MINUTE,
+        hour=SCHEDULER_CRON_HOUR,
         id="apply_light_schedule",
     )
     _scheduler.start()
