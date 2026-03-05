@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { View, Text, TextInput, Pressable, StyleSheet, Image, Alert, ActivityIndicator } from "react-native";
+import { View, Text, TextInput, Pressable, StyleSheet, Image } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 
@@ -9,42 +9,40 @@ export default function LoginScreen() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
+  // const [loading, setLoading] = useState(false);
+  // const baseUrl = (process.env.EXPO_PUBLIC_API_BASE_URL || "http://localhost:8000").replace(/\/+$/, "");
 
-  const baseUrl = (process.env.EXPO_PUBLIC_API_BASE_URL || "http://localhost:8000").replace(/\/+$/, "");
+  const onLogin = () => {
+    // Skip real auth for testing – just go to dashboard
+    router.replace("/dashboard");
 
-  const onLogin = async () => {
-    if (!email || !password) {
-      Alert.alert("Missing info", "Please enter both email and password.");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const response = await fetch(`${baseUrl}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-
-      if (!response.ok) {
-        const body = await response.json().catch(() => null);
-        const message =
-          (body && typeof body.detail === "string" && body.detail) ||
-          `Login failed (${response.status})`;
-        Alert.alert("Login failed", message);
-        return;
-      }
-
-      // In a fuller implementation we would persist auth state / token here.
-      // For now, successful login just navigates into the app.
-      router.replace("/dashboard");
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Unexpected network error";
-      Alert.alert("Network error", message);
-    } finally {
-      setLoading(false);
-    }
+    // --- Commented out: real login via backend ---
+    // if (!email || !password) {
+    //   Alert.alert("Missing info", "Please enter both email and password.");
+    //   return;
+    // }
+    // setLoading(true);
+    // try {
+    //   const response = await fetch(`${baseUrl}/auth/login`, {
+    //     method: "POST",
+    //     headers: { "Content-Type": "application/json" },
+    //     body: JSON.stringify({ email, password }),
+    //   });
+    //   if (!response.ok) {
+    //     const body = await response.json().catch(() => null);
+    //     const message =
+    //       (body && typeof body.detail === "string" && body.detail) ||
+    //       `Login failed (${response.status})`;
+    //     Alert.alert("Login failed", message);
+    //     return;
+    //   }
+    //   router.replace("/dashboard");
+    // } catch (err) {
+    //   const message = err instanceof Error ? err.message : "Unexpected network error";
+    //   Alert.alert("Network error", message);
+    // } finally {
+    //   setLoading(false);
+    // }
   };
 
   return (
@@ -73,18 +71,14 @@ export default function LoginScreen() {
           style={styles.input}
         />
 
-        <Pressable style={styles.buttonWrapper} onPress={() => void onLogin()} disabled={loading}>
+        <Pressable style={styles.buttonWrapper} onPress={onLogin}>
           <LinearGradient
             colors={["#3B6D31", "#C9FF6A"]}
             start={{ x: 0, y: 0.5 }}
             end={{ x: 1, y: 0.5 }}
-            style={[styles.button, loading && styles.buttonDisabled]}
+            style={styles.button}
           >
-            {loading ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <Text style={styles.buttonText}>Login</Text>
-            )}
+            <Text style={styles.buttonText}>Login</Text>
           </LinearGradient>
         </Pressable>
       </View>
