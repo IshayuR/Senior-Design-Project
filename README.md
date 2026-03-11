@@ -54,6 +54,18 @@ Frontend (toggle tap)
         → Backend receives telemetry
 ```
 
+### AWS IoT Core (MQTT)
+
+- Path: `aws/`
+- MQTT client module: `aws/mqtt_client.py`
+- ESP32 simulator: `aws/simulate_esp32.py`
+- End-to-end test: `aws/test_connection.py`
+- Certificates: `aws/certs/` (gitignored)
+- Protocol: MQTT over TLS (port 8883) using X.509 mutual authentication
+- Topics:
+  - `esp32/ESP32_Device_01/cmd` — commands sent to the ESP32
+  - `esp32/ESP32_Device_01/tele` — telemetry/status from the ESP32
+
 ### Data Model (Prototype)
 
 - `restaurant_lights`
@@ -346,6 +358,19 @@ curl "http://127.0.0.1:8000/lights/history?restaurantId=1"
 5. Open History tab and verify the new event appears.
 
 ### MQTT Only (without frontend)
+
+1. Start the simulator: `python -m aws.simulate_esp32`
+2. In a second terminal run: `python -m aws.test_connection`
+3. Confirm output shows `ALL TESTS PASSED (2/2)`
+
+Alternatively, use the **AWS IoT MQTT Test Console**:
+
+1. Subscribe to `esp32/ESP32_Device_01/tele`
+2. Publish `on` to `esp32/ESP32_Device_01/cmd`
+3. Confirm `LOAD=ON` appears on the tele subscription
+4. Publish `off` and confirm `LOAD=OFF`
+
+### MQTT (Backend ↔ ESP32)
 
 1. Start the simulator: `python -m aws.simulate_esp32`
 2. In a second terminal run: `python -m aws.test_connection`
