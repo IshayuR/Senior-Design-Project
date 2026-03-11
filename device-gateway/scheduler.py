@@ -13,10 +13,10 @@ def _current_time_str() -> str:
 
 
 def _apply_schedule_job() -> None:
-    """Fetch light schedule from backend; if current time matches schedule_on/off, publish to MQTT."""
+    """Fetch today's light schedule from backend; if current time matches schedule_on/off, publish to MQTT."""
     try:
         r = requests.get(
-            f"{BACKEND_URL}/lights/status",
+            f"{BACKEND_URL}/lights/schedule/today",
             params={"restaurantId": RESTAURANT_ID},
             timeout=5,
         )

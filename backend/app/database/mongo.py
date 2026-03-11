@@ -24,3 +24,9 @@ def get_user_collection():
     db = client[_get_db_name()]
     return db["users"]
 
+
+def get_schedule_collection():
+    client = get_mongo_client()
+    db = client[_get_db_name()]
+    return db["schedules"]
+

@@ -23,13 +23,37 @@ The backend provides API endpoints, MQTT integration, and state management for s
 
 ## Key Files
 
-- `main.py` – Entry point; runs the Flask app (`python main.py`)
-- `app.py` – Flask app: `POST /light` receives state, publishes to MQTT, returns JSON
-- `mqtt_client.py` – MQTT client (connect once, `publish_light_state(state)`)
-- `config.py` – Loads AWS/MQTT settings from `.env`
-- `.env.example` – Template for `AWS_IOT_ENDPOINT`, cert paths, topic (copy to `.env`)
-- `requirements.txt` – Flask, paho-mqtt, python-dotenv
-- `.gitignore` – Excludes `.env`, `*.pem`, `*.crt`, `*.key`
+| File | Purpose |
+|------|--------|
+| `main.py` | Entry point; runs Flask app + scheduler |
+| `app.py` | Flask app: `POST /light`, cron scheduler |
+| `mqtt_client.py` | AWS IoT MQTT: `IoTMQTTClient`, `publish_light_state()` |
+| `config.py` | Loads `.env` (endpoint, certs, BACKEND_URL, scheduler) |
+| `scheduler.py` | Cron: fetches `/lights/schedule/today`, publishes on/off at scheduled times |
+| `simulate_esp32.py` | ESP32 simulator: subscribes to `esp32/.../cmd`, replies on `esp32/.../tele` |
+| `test_connection.py` | E2E test: send on/off, expect LOAD=ON/LOAD=OFF (run with simulate_esp32 in another terminal) |
+| `requirements.txt` | Flask, paho-mqtt, python-dotenv, APScheduler, requests |
+| `.gitignore` | Excludes `.env`, `*.pem`, `*.crt`, `*.key` |
+
+## Init, simulate, test (run from `device-gateway`)
+
+- **Init** – Install deps and ensure `.env` exists:
+  ```bash
+  pip install -r requirements.txt
+  # Copy .env.example to .env and set AWS_IOT_ENDPOINT, cert paths
+  ```
+- **Simulate** – Run ESP32 simulator (one terminal):
+  ```bash
+  python simulate_esp32.py
+  ```
+- **Test** – With simulator running, in a second terminal:
+  ```bash
+  python test_connection.py
+  ```
+- **Run gateway** – Flask + scheduler:
+  ```bash
+  python main.py
+  ```
 
 ## Security
 

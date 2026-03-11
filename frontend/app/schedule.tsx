@@ -50,7 +50,7 @@ export default function ScheduleScreen() {
   const [activeTab, setActiveTab] = useState<ScheduleTab>("weekly");
   const [days, setDays] = useState<DaySchedule[]>(initialDays);
   const [specificDates, setSpecificDates] = useState<SpecificDateEntry[]>([]);
-  const { saveSchedule, loading } = useLighting();
+  const { saveWeeklySchedule, saveCustomSchedule, loading } = useLighting();
 
   const toggleDay = (id: string) => {
     setDays((prev: DaySchedule[]) => prev.map((d) => (d.id === id ? { ...d, enabled: !d.enabled } : d)));
@@ -61,10 +61,44 @@ export default function ScheduleScreen() {
   };
 
   const onApplySchedule = async () => {
-    const active = days.find((d) => d.enabled) ?? days[0];
     try {
-      await saveSchedule(active.start, active.stop);
-      Alert.alert("Saved", `Backend schedule updated (${active.start} -> ${active.stop}).`);
+      // Map UI days (SUN..SAT) to backend weekday indices (0=Monday..6=Sunday)
+      const backendDays = days.map((d) => {
+        const label = d.id;
+        let dayOfWeek = 0;
+        switch (label) {
+          case "mon":
+            dayOfWeek = 0;
+            break;
+          case "tue":
+            dayOfWeek = 1;
+            break;
+          case "wed":
+            dayOfWeek = 2;
+            break;
+          case "thu":
+            dayOfWeek = 3;
+            break;
+          case "fri":
+            dayOfWeek = 4;
+            break;
+          case "sat":
+            dayOfWeek = 5;
+            break;
+          case "sun":
+          default:
+            dayOfWeek = 6;
+            break;
+        }
+        return {
+          dayOfWeek,
+          enabled: d.enabled,
+          start: d.start,
+          stop: d.stop,
+        };
+      });
+      await saveWeeklySchedule(backendDays);
+      Alert.alert("Saved", "Weekly schedule updated.");
     } catch (err) {
       Alert.alert("Error", err instanceof Error ? err.message : "Failed to save schedule");
     }
@@ -92,11 +126,23 @@ export default function ScheduleScreen() {
     setSpecificDates((prev: SpecificDateEntry[]) => prev.filter((e) => e.id !== id));
   };
 
-  const onSaveSpecificDates = () => {
-    Alert.alert(
-      "Specific dates",
-      "Specific date overrides are saved locally. Backend support for these dates can be added later."
-    );
+  const onSaveSpecificDates = async () => {
+    try {
+      const payload = specificDates.map((e) => {
+        // Convert MM-DD-YYYY to YYYY-MM-DD for backend
+        const [mm, dd, yyyy] = e.date.split("-");
+        const isoDate = `${yyyy}-${mm}-${dd}`;
+        return {
+          date: isoDate,
+          start: e.start,
+          stop: e.stop,
+        };
+      });
+      await saveCustomSchedule(payload);
+      Alert.alert("Saved", "Custom dates updated. These override the weekly schedule when dates match.");
+    } catch (err) {
+      Alert.alert("Error", err instanceof Error ? err.message : "Failed to save custom dates");
+    }
   };
 
   return (

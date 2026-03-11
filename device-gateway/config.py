@@ -23,3 +23,8 @@ RESTAURANT_ID = int(os.getenv("RESTAURANT_ID", "1"))
 # Cron: run schedule check every minute
 SCHEDULER_CRON_MINUTE = os.getenv("SCHEDULER_CRON_MINUTE", "*")
 SCHEDULER_CRON_HOUR = os.getenv("SCHEDULER_CRON_HOUR", "*")
+
+# Local MQTT (no AWS, no certs): set LOCAL_MQTT=1 and run a broker on localhost (e.g. Mosquitto)
+LOCAL_MQTT = os.getenv("LOCAL_MQTT", "").lower() in ("1", "true", "yes")
+MQTT_BROKER = os.getenv("MQTT_BROKER", "localhost")
+MQTT_LOCAL_PORT = int(os.getenv("MQTT_LOCAL_PORT", "1883"))
