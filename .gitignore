@@ -13,6 +13,7 @@ frontend/.expo/
 *.pem
 *.crt
 *.key
+aws/certs/
 
 # Environment variables
 .env
