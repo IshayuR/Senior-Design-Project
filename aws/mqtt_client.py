@@ -16,7 +16,9 @@ from typing import Callable
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
 
-load_dotenv()
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,13 @@ TOPIC_TELE = f"esp32/{DEVICE_ID}/tele"
 
 PORT = 8883
 KEEPALIVE = 60
+
+
+def _resolve_path(path: str) -> str:
+    """Resolve relative cert paths from the project root, not CWD."""
+    if os.path.isabs(path):
+        return path
+    return os.path.join(PROJECT_ROOT, path)
 
 
 def _require_env(name: str, value: str) -> str:
@@ -52,9 +61,9 @@ class IoTMQTTClient:
         self._connected = False
 
         endpoint = _require_env("AWS_IOT_ENDPOINT", ENDPOINT)
-        ca = _require_env("AWS_IOT_CA_CERT", CA_CERT)
-        cert = _require_env("AWS_IOT_BACKEND_CERT", BACKEND_CERT)
-        key = _require_env("AWS_IOT_BACKEND_KEY", BACKEND_KEY)
+        ca = _resolve_path(_require_env("AWS_IOT_CA_CERT", CA_CERT))
+        cert = _resolve_path(_require_env("AWS_IOT_BACKEND_CERT", BACKEND_CERT))
+        key = _resolve_path(_require_env("AWS_IOT_BACKEND_KEY", BACKEND_KEY))
 
         for path, label in [(ca, "CA cert"), (cert, "Backend cert"), (key, "Backend key")]:
             if not os.path.isfile(path):

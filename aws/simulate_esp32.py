@@ -24,7 +24,9 @@ import time
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
 
-load_dotenv()
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,6 +34,13 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+
+
+def _resolve_path(path: str) -> str:
+    if os.path.isabs(path):
+        return path
+    return os.path.join(PROJECT_ROOT, path)
+
 
 ENDPOINT = os.getenv("AWS_IOT_ENDPOINT", "")
 CA_CERT = os.getenv("AWS_IOT_CA_CERT", "")
@@ -56,9 +65,9 @@ def _require(name: str, value: str) -> str:
 class ESP32Simulator:
     def __init__(self) -> None:
         endpoint = _require("AWS_IOT_ENDPOINT", ENDPOINT)
-        ca = _require("AWS_IOT_CA_CERT", CA_CERT)
-        cert = _require("AWS_IOT_ESP32_CERT", ESP32_CERT)
-        key = _require("AWS_IOT_ESP32_KEY", ESP32_KEY)
+        ca = _resolve_path(_require("AWS_IOT_CA_CERT", CA_CERT))
+        cert = _resolve_path(_require("AWS_IOT_ESP32_CERT", ESP32_CERT))
+        key = _resolve_path(_require("AWS_IOT_ESP32_KEY", ESP32_KEY))
 
         for path, label in [(ca, "CA cert"), (cert, "ESP32 cert"), (key, "ESP32 key")]:
             if not os.path.isfile(path):
