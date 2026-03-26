@@ -3,12 +3,8 @@
 Full-stack proof of concept for CSE Senior Design:
 
 - React Native frontend with Expo Router
-<<<<<<< HEAD
-- FastAPI backend with SQLite persistence
-=======
 - FastAPI backend with built-in MQTT bridge and cron scheduler
 - SQLite persistence layer
->>>>>>> 0108b824 (update README)
 - AWS IoT Core integration via MQTT (paho-mqtt)
 - Weekly and custom date scheduling with automatic light control
 - ESP32 device simulator for end-to-end testing without hardware
@@ -53,37 +49,8 @@ Frontend (Expo / React Native)
 - Route module: `backend/app/routes/lights.py`
 - Service layer: `backend/app/services/light_service.py`
 - DB layer: `backend/app/database/db.py` (SQLite)
-<<<<<<< HEAD
-- On startup, connects to AWS IoT Core via MQTT
-- Toggle endpoint publishes `on`/`off` commands to the ESP32
-
-### AWS IoT Core (MQTT)
-
-- Path: `aws/`
-- MQTT client module: `aws/mqtt_client.py`
-- ESP32 simulator: `aws/simulate_esp32.py`
-- End-to-end test: `aws/test_connection.py`
-- Certificates: `aws/certs/` (gitignored)
-- Protocol: MQTT over TLS (port 8883) using X.509 mutual authentication
-- Topics:
-  - `esp32/ESP32_Device_01/cmd` — commands sent to the ESP32
-  - `esp32/ESP32_Device_01/tele` — telemetry/status from the ESP32
-
-### Data Flow
-
-```
-Frontend (toggle tap)
-  → POST /lights/toggle
-    → FastAPI updates SQLite
-    → FastAPI publishes "on"/"off" to MQTT cmd topic
-      → ESP32 (or simulator) receives command
-      → ESP32 publishes "LOAD=ON"/"LOAD=OFF" to tele topic
-        → Backend receives telemetry
-```
-=======
 - MQTT bridge: `backend/app/mqtt_bridge.py` (connects to AWS IoT Core on startup)
 - Scheduler: `backend/app/scheduler.py` (APScheduler cron job, checks schedules every minute)
->>>>>>> 0108b824 (update README)
 
 ### AWS IoT Core (MQTT)
 
@@ -115,6 +82,18 @@ Frontend (toggle tap)
   - `id` (auto), `restaurant_id`, `schedule_date` (YYYY-MM-DD)
   - `start_time`, `stop_time`, `updated_at`
   - Unique constraint: `(restaurant_id, schedule_date)`
+
+### Data Flow
+
+```text
+Frontend (toggle tap)
+  --> POST /lights/toggle
+    --> FastAPI updates SQLite
+    --> FastAPI publishes "on"/"off" to MQTT cmd topic
+      --> ESP32 (or simulator) receives command
+      --> ESP32 publishes "LOAD=ON"/"LOAD=OFF" to tele topic
+        --> Backend receives telemetry
+```
 
 ---
 
@@ -197,11 +176,11 @@ cp .env.example .env
 ```
 
 2. Place the following certificate files in `aws/certs/`:
-   - `AmazonRootCA1.pem` — Amazon Root CA
-   - `backend-certificate.pem.crt` — backend client certificate
-   - `backend-private.pem.key` — backend client private key
-   - `esp32-certificate.pem.crt` — ESP32 device certificate
-   - `esp32-private.pem.key` — ESP32 device private key
+  - `AmazonRootCA1.pem` — Amazon Root CA
+  - `backend-certificate.pem.crt` — backend client certificate
+  - `backend-private.pem.key` — backend client private key
+  - `esp32-certificate.pem.crt` — ESP32 device certificate
+  - `esp32-private.pem.key` — ESP32 device private key
 
 3. Verify `.env` has the correct endpoint and cert paths:
 
@@ -271,22 +250,6 @@ If MQTT certs are not configured, the backend still runs — toggles just apply 
 
 Backend URL: `http://127.0.0.1:8000`
 
-### Terminal 2: Backend
-
-```bash
-source venv/bin/activate
-cd backend && uvicorn app.main:app --reload --host 0.0.0.0
-```
-
-On startup the backend will:
-1. Initialize SQLite (creates tables if needed)
-2. Connect to AWS IoT Core via the MQTT bridge
-3. Start the cron scheduler (checks schedules every minute)
-
-Look for `MQTT bridge: connected to AWS IoT Core` in the logs.
-
-Backend URL: `http://0.0.0.0:8000`
-
 ### Terminal 3: Frontend
 
 ```bash
@@ -302,89 +265,22 @@ Then:
 
 ---
 
-<<<<<<< HEAD
-## Make-Style Command Shortcuts
-
-Use these as quick copy/paste shortcuts (make-style workflow without requiring a `Makefile`).
-
-### Setup
-
-- `setup-python`
-  ```bash
-  python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
-  ```
-- `setup-frontend`
-  ```bash
-  cd frontend && npm install
-  ```
-
-### Run
-
-- `run-simulator`
-  ```bash
-  source venv/bin/activate && python -m aws.simulate_esp32
-  ```
-- `run-backend`
-  ```bash
-  source venv/bin/activate && cd backend && uvicorn app.main:app --reload --host 0.0.0.0
-  ```
-- `run-frontend`
-  ```bash
-  cd frontend && npm start
-  ```
-
-### Test
-
-- `test-api`
-  ```bash
-  curl http://127.0.0.1:8000/health && \
-  curl "http://127.0.0.1:8000/lights/status?restaurantId=1" && \
-  curl -X POST "http://127.0.0.1:8000/lights/toggle" -H "Content-Type: application/json" -d '{"restaurantId":1,"action":"toggle"}' && \
-  curl "http://127.0.0.1:8000/lights/history?restaurantId=1"
-  ```
-- `test-mqtt` (requires simulator running in another terminal)
-  ```bash
-  source venv/bin/activate && python -m aws.test_connection
-  ```
-
-### Stop
-
-- `stop-backend`
-  ```bash
-  lsof -ti :8000 | xargs kill -9
-  ```
-- `stop-frontend`
-  ```bash
-  lsof -ti :8081 | xargs kill -9
-  ```
-
----
-
 ## API Endpoints
 
-- `GET /health` — returns `{"status": "ok", "mqtt": "connected"|"disconnected"}`
-- `GET /lights/status?restaurantId=1`
-- `POST /lights/toggle` — toggles DB state and sends MQTT command to ESP32
-- `POST /lights/schedule`
-- `GET /lights/history`
-=======
-## API Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | Health check |
-| `GET` | `/lights/status?restaurantId=1` | Current light state |
-| `POST` | `/lights/toggle` | Toggle light on/off (also publishes MQTT) |
-| `POST` | `/lights/schedule` | Set simple schedule on/off times |
-| `POST` | `/lights/schedule/weekly` | Upsert weekly schedule (per day of week) |
-| `POST` | `/lights/schedule/custom` | Upsert custom date overrides |
-| `GET` | `/lights/schedule/today?restaurantId=1` | Today's effective schedule |
-| `GET` | `/lights/history?restaurantId=1` | Action history log |
->>>>>>> 0108b824 (update README)
+| Method | Path                                    | Description                               |
+| ------ | --------------------------------------- | ----------------------------------------- |
+| `GET`  | `/health`                               | Health check                              |
+| `GET`  | `/lights/status?restaurantId=1`         | Current light state                       |
+| `POST` | `/lights/toggle`                        | Toggle light on/off (also publishes MQTT) |
+| `POST` | `/lights/schedule`                      | Set simple schedule on/off times          |
+| `POST` | `/lights/schedule/weekly`               | Upsert weekly schedule (per day of week)  |
+| `POST` | `/lights/schedule/custom`               | Upsert custom date overrides              |
+| `GET`  | `/lights/schedule/today?restaurantId=1` | Today's effective schedule                |
+| `GET`  | `/lights/history?restaurantId=1`        | Action history log                        |
 
 Example payloads:
 
-```json
+```jsonc
 // POST /lights/toggle
 { "restaurantId": 1, "action": "toggle" }
 
@@ -458,28 +354,6 @@ curl "http://127.0.0.1:8000/lights/history?restaurantId=1"
 
 ## Manual End-to-End Test Flow
 
-<<<<<<< HEAD
-### Frontend ↔ Backend ↔ ESP32
-
-1. Start the simulator (Terminal 1), backend (Terminal 2), and frontend (Terminal 3).
-2. On Dashboard, tap the bulb to toggle lights.
-3. Confirm the frontend state changes immediately.
-4. Check Terminal 1 (simulator) — it should show the received command and published response.
-5. Open History tab and verify the new event appears.
-
-### MQTT Only (without frontend)
-
-1. Start the simulator: `python -m aws.simulate_esp32`
-2. In a second terminal run: `python -m aws.test_connection`
-3. Confirm output shows `ALL TESTS PASSED (2/2)`
-
-Alternatively, use the **AWS IoT MQTT Test Console**:
-
-1. Subscribe to `esp32/ESP32_Device_01/tele`
-2. Publish `on` to `esp32/ESP32_Device_01/cmd`
-3. Confirm `LOAD=ON` appears on the tele subscription
-4. Publish `off` and confirm `LOAD=OFF`
-=======
 ### Frontend to Backend to ESP32
 
 1. Start the simulator, backend, and frontend (see Run the Project above).
@@ -489,7 +363,6 @@ Alternatively, use the **AWS IoT MQTT Test Console**:
 5. Watch the simulator for `Received cmd <- 'on'` and `LOAD=ON`.
 6. Toggle again and confirm `off` / `LOAD=OFF`.
 7. Open History and verify events appear.
->>>>>>> 0108b824 (update README)
 
 ### Scheduling
 
@@ -515,7 +388,12 @@ Alternatively, use the **AWS IoT MQTT Test Console**:
 ### Database Verification
 
 ```bash
-sqlite3 backend/app/database/lights.db "SELECT * FROM restaurant_lights; SELECT '---'; SELECT * FROM light_history ORDER BY timestamp DESC LIMIT 5; SELECT '---'; SELECT * FROM weekly_schedule;"
+sqlite3 backend/app/database/lights.db \
+  "SELECT * FROM restaurant_lights; \
+   SELECT '---'; \
+   SELECT * FROM light_history ORDER BY timestamp DESC LIMIT 5; \
+   SELECT '---'; \
+   SELECT * FROM weekly_schedule;"
 ```
 
 ---
@@ -585,3 +463,4 @@ kill -9 <PID>
 lsof -i :8081
 kill -9 <PID>
 ```
+
