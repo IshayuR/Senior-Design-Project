@@ -202,6 +202,4 @@ class LightService:
             "state": row["state"],
             "brightness": row["brightness"],
             "lastUpdated": row["last_updated"],
-            "scheduleOn": row.get("schedule_on"),
-            "scheduleOff": row.get("schedule_off"),
         }

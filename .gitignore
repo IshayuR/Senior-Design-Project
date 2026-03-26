@@ -1,29 +1,31 @@
-# Env and secrets
-.env
-.env.local
-*.env
-
-# Python
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
-.venv/
+*.so
+
+# Virtual environment
 venv/
-*.db
+env/
+frontend/node_modules/
+frontend/.expo/
 
-# Node / Expo
-node_modules/
-.expo/
-dist/
-npm-debug.log*
+# Certificates, keys, sensitive info
+*.pem
+*.crt
+*.key
+aws/certs/
 
-# IDE / OS
-.idea/
-.vscode/
+# Environment variables
+.env
+
+# System files
 .DS_Store
 Thumbs.db
 
-# Nested .git (old sub-repos) - uncomment if you want one repo history only
-# backend/.git
-# frontend/.git
-# device-gateway/.git
-# archive/**/.git
+# IDE files
+.vscode/
+*.swp
+.idea/
+
+# Local backend database
+backend/app/database/lights.db
