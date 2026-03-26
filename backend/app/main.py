@@ -8,7 +8,28 @@ from fastapi.middleware.cors import CORSMiddleware
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from app.database.db import init_db
+from app.mqtt_bridge import connect as mqtt_connect, disconnect as mqtt_disconnect
 from app.routes.lights import router as lights_router
+from app.scheduler import start_scheduler, stop_scheduler
+
+_env = Path(__file__).resolve().parent.parent.parent / ".env"
+load_dotenv(_env)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    init_db()
+    mqtt_connect()
+    start_scheduler()
+    yield
+    stop_scheduler()
+    mqtt_disconnect()
+
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +37,7 @@ app = FastAPI(title="Restaurant Lighting API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Local prototype only; tighten for production.
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
