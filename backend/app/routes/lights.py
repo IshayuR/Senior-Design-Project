@@ -1,10 +1,16 @@
+from datetime import date, datetime, timezone
+
 from fastapi import APIRouter, HTTPException, Query
 
+from app.database.db import get_connection
 from app.models.light import (
+    CustomScheduleUpsertRequest,
     LightHistoryItem,
     LightStatusResponse,
     ScheduleLightRequest,
+    TodayScheduleResponse,
     ToggleLightRequest,
+    WeeklyScheduleUpsertRequest,
 )
 from app.services.light_service import LightService, SQLiteLightRepository
 
@@ -36,3 +42,83 @@ def schedule_light(payload: ScheduleLightRequest) -> dict:
 @router.get("/history", response_model=list[LightHistoryItem])
 def get_light_history(restaurantId: int | None = Query(default=None, ge=1)) -> list[dict]:
     return service.get_history(restaurantId)
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@router.post("/schedule/weekly")
+def upsert_weekly_schedule(payload: WeeklyScheduleUpsertRequest) -> dict:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        for day in payload.days:
+            cursor.execute(
+                """
+                INSERT INTO weekly_schedule (restaurant_id, day_of_week, enabled, start_time, stop_time, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(restaurant_id, day_of_week) DO UPDATE SET
+                    enabled = excluded.enabled,
+                    start_time = excluded.start_time,
+                    stop_time = excluded.stop_time,
+                    updated_at = excluded.updated_at
+                """,
+                (payload.restaurantId, day.dayOfWeek, int(day.enabled), day.start, day.stop, _utc_now_iso()),
+            )
+    return {"ok": True}
+
+
+@router.post("/schedule/custom")
+def upsert_custom_schedule(payload: CustomScheduleUpsertRequest) -> dict:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM custom_schedule WHERE restaurant_id = ?",
+            (payload.restaurantId,),
+        )
+        for entry in payload.dates:
+            cursor.execute(
+                """
+                INSERT INTO custom_schedule (restaurant_id, schedule_date, start_time, stop_time, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (payload.restaurantId, entry.schedule_date.isoformat(), entry.start, entry.stop, _utc_now_iso()),
+            )
+    return {"ok": True}
+
+
+@router.get("/schedule/today", response_model=TodayScheduleResponse)
+def get_today_schedule(restaurantId: int = Query(..., ge=1)) -> dict:
+    """Return today's effective on/off schedule, with custom dates overriding weekly."""
+    today = date.today()
+    today_iso = today.isoformat()
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT start_time, stop_time FROM custom_schedule WHERE restaurant_id = ? AND schedule_date = ?",
+            (restaurantId, today_iso),
+        )
+        custom_row = cursor.fetchone()
+        if custom_row:
+            return {
+                "restaurantId": restaurantId,
+                "scheduleOn": custom_row["start_time"],
+                "scheduleOff": custom_row["stop_time"],
+            }
+
+        weekday = today.weekday()
+        cursor.execute(
+            "SELECT enabled, start_time, stop_time FROM weekly_schedule WHERE restaurant_id = ? AND day_of_week = ?",
+            (restaurantId, weekday),
+        )
+        weekly_row = cursor.fetchone()
+        if weekly_row and weekly_row["enabled"]:
+            return {
+                "restaurantId": restaurantId,
+                "scheduleOn": weekly_row["start_time"],
+                "scheduleOff": weekly_row["stop_time"],
+            }
+
+    return {"restaurantId": restaurantId, "scheduleOn": None, "scheduleOff": None}

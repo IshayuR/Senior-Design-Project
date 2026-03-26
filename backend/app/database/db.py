@@ -53,6 +53,33 @@ def init_db() -> None:
         )
         cursor.execute(
             """
+            CREATE TABLE IF NOT EXISTS weekly_schedule (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                restaurant_id INTEGER NOT NULL,
+                day_of_week INTEGER NOT NULL CHECK(day_of_week >= 0 AND day_of_week <= 6),
+                enabled INTEGER NOT NULL DEFAULT 0,
+                start_time TEXT NOT NULL,
+                stop_time TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(restaurant_id, day_of_week)
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS custom_schedule (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                restaurant_id INTEGER NOT NULL,
+                schedule_date TEXT NOT NULL,
+                start_time TEXT NOT NULL,
+                stop_time TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(restaurant_id, schedule_date)
+            )
+            """
+        )
+        cursor.execute(
+            """
             INSERT OR IGNORE INTO restaurant_lights (
                 restaurant_id, state, brightness, schedule_on, schedule_off, last_updated
             ) VALUES (?, ?, ?, ?, ?, ?)

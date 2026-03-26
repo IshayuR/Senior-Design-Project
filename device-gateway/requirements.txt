@@ -1,5 +1,0 @@
-Flask
-paho-mqtt
-python-dotenv
-APScheduler
-requests
