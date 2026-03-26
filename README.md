@@ -3,10 +3,10 @@
 Full-stack proof of concept for CSE Senior Design:
 
 - React Native frontend with Expo Router
-- FastAPI backend
-- SQLite persistence layer (repository abstraction for later MongoDB migration)
+- FastAPI backend with SQLite persistence
 - AWS IoT Core integration via MQTT (paho-mqtt)
 - ESP32 device simulator for end-to-end testing without hardware
+- Repository/service abstraction for later MongoDB migration
 
 ---
 
@@ -27,6 +27,32 @@ Full-stack proof of concept for CSE Senior Design:
 - Route module: `backend/app/routes/lights.py`
 - Service layer: `backend/app/services/light_service.py`
 - DB layer: `backend/app/database/db.py` (SQLite)
+- On startup, connects to AWS IoT Core via MQTT
+- Toggle endpoint publishes `on`/`off` commands to the ESP32
+
+### AWS IoT Core (MQTT)
+
+- Path: `aws/`
+- MQTT client module: `aws/mqtt_client.py`
+- ESP32 simulator: `aws/simulate_esp32.py`
+- End-to-end test: `aws/test_connection.py`
+- Certificates: `aws/certs/` (gitignored)
+- Protocol: MQTT over TLS (port 8883) using X.509 mutual authentication
+- Topics:
+  - `esp32/ESP32_Device_01/cmd` — commands sent to the ESP32
+  - `esp32/ESP32_Device_01/tele` — telemetry/status from the ESP32
+
+### Data Flow
+
+```
+Frontend (toggle tap)
+  → POST /lights/toggle
+    → FastAPI updates SQLite
+    → FastAPI publishes "on"/"off" to MQTT cmd topic
+      → ESP32 (or simulator) receives command
+      → ESP32 publishes "LOAD=ON"/"LOAD=OFF" to tele topic
+        → Backend receives telemetry
+```
 
 ### AWS IoT Core (MQTT)
 
@@ -183,30 +209,28 @@ Use the right value per target:
 
 ## Run the Project
 
-### Terminal 1: Backend
-
-```bash
-source venv/bin/activate
-cd backend
-uvicorn app.main:app --reload
-```
-
-If file-watcher issues appear in your environment:
-
-```bash
-uvicorn app.main:app
-```
-
-Backend URL: `http://127.0.0.1:8000`
-
-### Terminal 2: ESP32 Simulator (optional — for MQTT testing)
+### Terminal 1: ESP32 Simulator
 
 ```bash
 source venv/bin/activate
 python -m aws.simulate_esp32
 ```
 
-On startup the simulator publishes `boot` to the telemetry topic, then listens for `on`/`off` commands.
+Start this first so it's ready when the backend connects. On startup the simulator publishes `boot` to the telemetry topic, then listens for `on`/`off` commands.
+
+### Terminal 2: Backend
+
+```bash
+source venv/bin/activate
+cd backend
+uvicorn app.main:app --reload --host 0.0.0.0
+```
+
+On startup the backend connects to AWS IoT Core via MQTT. When you toggle lights from the frontend, the backend publishes `on`/`off` to the ESP32 cmd topic automatically.
+
+If MQTT certs are not configured, the backend still runs — toggles just apply to the database only.
+
+Backend URL: `http://127.0.0.1:8000`
 
 ### Terminal 3: Frontend
 
@@ -240,9 +264,13 @@ Use these as quick copy/paste shortcuts (make-style workflow without requiring a
 
 ### Run
 
+- `run-simulator`
+  ```bash
+  source venv/bin/activate && python -m aws.simulate_esp32
+  ```
 - `run-backend`
   ```bash
-  source venv/bin/activate && cd backend && uvicorn app.main:app --reload
+  source venv/bin/activate && cd backend && uvicorn app.main:app --reload --host 0.0.0.0
   ```
 - `run-frontend`
   ```bash
@@ -278,9 +306,9 @@ Use these as quick copy/paste shortcuts (make-style workflow without requiring a
 
 ## API Endpoints
 
-- `GET /health`
+- `GET /health` — returns `{"status": "ok", "mqtt": "connected"|"disconnected"}`
 - `GET /lights/status?restaurantId=1`
-- `POST /lights/toggle`
+- `POST /lights/toggle` — toggles DB state and sends MQTT command to ESP32
 - `POST /lights/schedule`
 - `GET /lights/history`
 
@@ -321,14 +349,26 @@ curl "http://127.0.0.1:8000/lights/history?restaurantId=1"
 
 ## Manual End-to-End Test Flow
 
-### Frontend ↔ Backend
+### Frontend ↔ Backend ↔ ESP32
 
-1. Open app and login.
-2. On Dashboard, tap bulb to toggle lights.
-3. Confirm status changes immediately.
-4. Open History and verify new event appears.
-5. Open Schedule, change times, apply schedule.
-6. Recheck status/history and confirm backend updates persisted.
+1. Start the simulator (Terminal 1), backend (Terminal 2), and frontend (Terminal 3).
+2. On Dashboard, tap the bulb to toggle lights.
+3. Confirm the frontend state changes immediately.
+4. Check Terminal 1 (simulator) — it should show the received command and published response.
+5. Open History tab and verify the new event appears.
+
+### MQTT Only (without frontend)
+
+1. Start the simulator: `python -m aws.simulate_esp32`
+2. In a second terminal run: `python -m aws.test_connection`
+3. Confirm output shows `ALL TESTS PASSED (2/2)`
+
+Alternatively, use the **AWS IoT MQTT Test Console**:
+
+1. Subscribe to `esp32/ESP32_Device_01/tele`
+2. Publish `on` to `esp32/ESP32_Device_01/cmd`
+3. Confirm `LOAD=ON` appears on the tele subscription
+4. Publish `off` and confirm `LOAD=OFF`
 
 ### MQTT (Backend ↔ ESP32)
 
@@ -347,8 +387,7 @@ Alternatively, use the **AWS IoT MQTT Test Console**:
 
 ## Stopping Running Services
 
-- In backend terminal: `Ctrl + C`
-- In frontend terminal: `Ctrl + C`
+- In any terminal: `Ctrl + C`
 
 If a port is stuck:
 

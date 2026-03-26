@@ -1,6 +1,6 @@
-from datetime import date, datetime, timezone
+import logging
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.database.db import get_connection
 from app.models.light import (
@@ -14,6 +14,8 @@ from app.models.light import (
 )
 from app.services.light_service import LightService, SQLiteLightRepository
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/lights", tags=["lights"])
 service = LightService(repository=SQLiteLightRepository())
 
@@ -24,10 +26,24 @@ def get_light_status(restaurantId: int = Query(..., ge=1)) -> dict:
 
 
 @router.post("/toggle", response_model=LightStatusResponse)
-def toggle_light(payload: ToggleLightRequest) -> dict:
+def toggle_light(payload: ToggleLightRequest, request: Request) -> dict:
     if payload.action != "toggle":
         raise HTTPException(status_code=400, detail="action must be 'toggle'")
-    return service.toggle_light(payload.restaurantId)
+
+    result = service.toggle_light(payload.restaurantId)
+
+    mqtt_client = getattr(request.app.state, "mqtt", None)
+    if mqtt_client and mqtt_client.is_connected:
+        command = "on" if result["state"] == "on" else "off"
+        try:
+            mqtt_client.publish_command(command)
+            logger.info("MQTT command '%s' sent to ESP32", command)
+        except Exception as exc:
+            logger.error("Failed to send MQTT command: %s", exc)
+    else:
+        logger.warning("MQTT not connected — toggle applied to DB only")
+
+    return result
 
 
 @router.post("/schedule", response_model=LightStatusResponse)
