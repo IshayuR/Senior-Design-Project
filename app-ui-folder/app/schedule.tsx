@@ -48,6 +48,7 @@ type ScheduleTab = "weekly" | "custom";
 
 export default function ScheduleScreen() {
   const [activeTab, setActiveTab] = useState<ScheduleTab>("weekly");
+  const [timeZone] = useState<string>("EST");
   const [days, setDays] = useState<DaySchedule[]>(initialDays);
   const [specificDates, setSpecificDates] = useState<SpecificDateEntry[]>([]);
   const { saveSchedule, loading } = useLighting();
@@ -63,7 +64,7 @@ export default function ScheduleScreen() {
   const onApplySchedule = async () => {
     const active = days.find((d) => d.enabled) ?? days[0];
     try {
-      await saveSchedule(active.start, active.stop);
+      await saveSchedule(active.start, active.stop, timeZone);
       Alert.alert("Saved", `Backend schedule updated (${active.start} -> ${active.stop}).`);
     } catch (err) {
       Alert.alert("Error", err instanceof Error ? err.message : "Failed to save schedule");

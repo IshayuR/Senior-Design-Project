@@ -24,7 +24,7 @@ type LightingContextType = {
   toggleLight: () => Promise<void>;
   refreshStatus: () => Promise<void>;
   refreshHistory: () => Promise<void>;
-  saveSchedule: (scheduleOn: string, scheduleOff: string) => Promise<void>;
+  saveSchedule: (scheduleOn: string, scheduleOff: string, timeZone: string) => Promise<void>;
 };
 
 const LightingContext = createContext<LightingContextType | undefined>(undefined);
@@ -86,7 +86,7 @@ export const LightingProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const saveSchedule = async (scheduleOn: string, scheduleOff: string) => {
+  const saveSchedule = async (scheduleOn: string, scheduleOff: string, timeZone: string) => {
     setLoading(true);
     setError(null);
     try {
@@ -97,6 +97,8 @@ export const LightingProvider = ({ children }: { children: ReactNode }) => {
           restaurantId: RESTAURANT_ID,
           scheduleOn,
           scheduleOff,
+          timeZone,
+          timezone: timeZone,
         }),
       });
       if (!response.ok) {
