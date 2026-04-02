@@ -7,19 +7,6 @@ type BackendStatus = {
   lastUpdated: string;
 };
 
-type WeeklyDaySchedule = {
-  dayOfWeek: number; // 0=Monday..6=Sunday
-  enabled: boolean;
-  start: string;
-  stop: string;
-};
-
-type CustomDateEntry = {
-  date: string; // YYYY-MM-DD
-  start: string;
-  stop: string;
-};
-
 type BackendHistory = {
   id: number;
   restaurantId: number;
@@ -37,8 +24,7 @@ type LightingContextType = {
   toggleLight: () => Promise<void>;
   refreshStatus: () => Promise<void>;
   refreshHistory: () => Promise<void>;
-  saveWeeklySchedule: (days: WeeklyDaySchedule[]) => Promise<void>;
-  saveCustomSchedule: (dates: CustomDateEntry[]) => Promise<void>;
+  saveSchedule: (scheduleOn: string, scheduleOff: string, timeZone: string) => Promise<void>;
 };
 
 const LightingContext = createContext<LightingContextType | undefined>(undefined);
@@ -100,21 +86,27 @@ export const LightingProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const saveWeeklySchedule = async (days: WeeklyDaySchedule[]) => {
+  const saveSchedule = async (scheduleOn: string, scheduleOff: string, timeZone: string) => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${baseUrl}/lights/schedule/weekly`, {
+      const response = await fetch(`${baseUrl}/lights/schedule`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           restaurantId: RESTAURANT_ID,
-          days,
+          scheduleOn,
+          scheduleOff,
+          timeZone,
+          timezone: timeZone,
         }),
       });
       if (!response.ok) {
-        throw new Error(`Weekly schedule request failed (${response.status})`);
+        throw new Error(`Schedule request failed (${response.status})`);
       }
+      const body = (await response.json()) as BackendStatus;
+      setStatus(body);
+      await refreshHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown schedule error");
       throw err;
@@ -158,29 +150,7 @@ export const LightingProvider = ({ children }: { children: ReactNode }) => {
         toggleLight,
         refreshStatus,
         refreshHistory,
-        saveWeeklySchedule,
-        saveCustomSchedule: async (dates: CustomDateEntry[]) => {
-          setLoading(true);
-          setError(null);
-          try {
-            const response = await fetch(`${baseUrl}/lights/schedule/custom`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                restaurantId: RESTAURANT_ID,
-                dates,
-              }),
-            });
-            if (!response.ok) {
-              throw new Error(`Custom schedule request failed (${response.status})`);
-            }
-          } catch (err) {
-            setError(err instanceof Error ? err.message : "Unknown custom schedule error");
-            throw err;
-          } finally {
-            setLoading(false);
-          }
-        },
+        saveSchedule,
       }}
     >
       {children}
