@@ -9,8 +9,9 @@ Prerequisites:
   - simulate_esp32.py must be running in another terminal
   - .env must have both backend and ESP32 cert paths configured
 
-Usage (from device-gateway folder):
-    python test_connection.py
+Usage:
+    python -m aws.test_connection        # from project root
+    python aws/test_connection.py        # also works
 """
 
 from __future__ import annotations
@@ -20,7 +21,9 @@ import sys
 import threading
 import time
 
-from mqtt_client import IoTMQTTClient
+sys.path.insert(0, ".")
+
+from aws.mqtt_client import IoTMQTTClient  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,

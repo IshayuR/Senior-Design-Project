@@ -7,8 +7,9 @@ can be validated before the physical hardware is available.
 
 Uses the ESP32's OWN certificates (separate from the backend's certs).
 
-Usage (from device-gateway folder):
-    python simulate_esp32.py
+Usage:
+    python -m aws.simulate_esp32          # from project root
+    python aws/simulate_esp32.py          # also works
 """
 
 from __future__ import annotations
@@ -22,10 +23,10 @@ import time
 
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
-from pathlib import Path
 
-_SCRIPT_DIR = Path(__file__).resolve().parent
-load_dotenv(_SCRIPT_DIR / ".env")
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,23 +36,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def _resolve_cert_path(path: str) -> str:
-    """Resolve relative paths (e.g. ./file.pem) relative to device-gateway folder."""
-    p = Path(path)
-    if not p.is_absolute():
-        p = _SCRIPT_DIR / p
-    return str(p.resolve())
+def _resolve_path(path: str) -> str:
+    if os.path.isabs(path):
+        return path
+    return os.path.join(PROJECT_ROOT, path)
 
 
 ENDPOINT = os.getenv("AWS_IOT_ENDPOINT", "")
-CA_CERT = _resolve_cert_path(os.getenv("AWS_IOT_CA_CERT", "") or "./AmazonRootCA1.pem")
-ESP32_CERT = _resolve_cert_path(os.getenv("AWS_IOT_ESP32_CERT", "") or "./certificate.pem.crt")
-ESP32_KEY = _resolve_cert_path(os.getenv("AWS_IOT_ESP32_KEY", "") or "./private.pem.key")
-
-# Local broker (default): no AWS/certs; run e.g. docker run -p 1883:1883 eclipse-mosquitto
-# Uncomment the AWS block in __init__ and comment the local block to use AWS IoT.
-MQTT_BROKER = os.getenv("MQTT_BROKER", "localhost")
-MQTT_LOCAL_PORT = int(os.getenv("MQTT_LOCAL_PORT", "1883"))
+CA_CERT = os.getenv("AWS_IOT_CA_CERT", "")
+ESP32_CERT = os.getenv("AWS_IOT_ESP32_CERT", "")
+ESP32_KEY = os.getenv("AWS_IOT_ESP32_KEY", "")
 
 DEVICE_ID = "ESP32_Device_01"
 TOPIC_CMD = f"esp32/{DEVICE_ID}/cmd"
@@ -70,39 +64,30 @@ def _require(name: str, value: str) -> str:
 
 class ESP32Simulator:
     def __init__(self) -> None:
+        endpoint = _require("AWS_IOT_ENDPOINT", ENDPOINT)
+        ca = _resolve_path(_require("AWS_IOT_CA_CERT", CA_CERT))
+        cert = _resolve_path(_require("AWS_IOT_ESP32_CERT", ESP32_CERT))
+        key = _resolve_path(_require("AWS_IOT_ESP32_KEY", ESP32_KEY))
+
+        for path, label in [(ca, "CA cert"), (cert, "ESP32 cert"), (key, "ESP32 key")]:
+            if not os.path.isfile(path):
+                logger.error("%s not found: %s", label, path)
+                sys.exit(1)
+
+        self._endpoint = endpoint
         self._connected = False
 
-        # --- Local broker (default): no certs ---
-        self._host = MQTT_BROKER
-        self._port = MQTT_LOCAL_PORT
-        logger.info("Local MQTT: %s:%d (no certs)", self._host, self._port)
         self._client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
             client_id=DEVICE_ID,
             protocol=mqtt.MQTTv311,
         )
-
-        # --- AWS IoT (comment out local block above and uncomment below) ---
-        # endpoint = _require("AWS_IOT_ENDPOINT", ENDPOINT)
-        # ca, cert, key = CA_CERT, ESP32_CERT, ESP32_KEY
-        # for path, label in [(ca, "CA cert"), (cert, "ESP32 cert"), (key, "ESP32 key")]:
-        #     if not os.path.isfile(path):
-        #         logger.error("%s not found: %s", label, path)
-        #         sys.exit(1)
-        # self._host = endpoint
-        # self._port = PORT
-        # self._client = mqtt.Client(
-        #     callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-        #     client_id=DEVICE_ID,
-        #     protocol=mqtt.MQTTv311,
-        # )
-        # self._client.tls_set(
-        #     ca_certs=ca,
-        #     certfile=cert,
-        #     keyfile=key,
-        #     tls_version=ssl.PROTOCOL_TLSv1_2,
-        # )
-
+        self._client.tls_set(
+            ca_certs=ca,
+            certfile=cert,
+            keyfile=key,
+            tls_version=ssl.PROTOCOL_TLSv1_2,
+        )
         self._client.on_connect = self._on_connect
         self._client.on_disconnect = self._on_disconnect
         self._client.on_message = self._on_message
@@ -116,7 +101,7 @@ class ESP32Simulator:
         properties: mqtt.Properties | None,
     ) -> None:
         if reason_code == 0:
-            logger.info("Connected as '%s'", DEVICE_ID)
+            logger.info("Connected to AWS IoT Core as '%s'", DEVICE_ID)
             client.subscribe(TOPIC_CMD, qos=1)
             logger.info("Subscribed to %s", TOPIC_CMD)
             self._connected = True
@@ -159,8 +144,8 @@ class ESP32Simulator:
         logger.info("Published '%s' → %s", response, TOPIC_TELE)
 
     def run(self) -> None:
-        logger.info("Connecting to %s:%d …", self._host, self._port)
-        self._client.connect(self._host, self._port, KEEPALIVE)
+        logger.info("Connecting to %s:%d …", self._endpoint, PORT)
+        self._client.connect(self._endpoint, PORT, KEEPALIVE)
 
         shutdown = False
 

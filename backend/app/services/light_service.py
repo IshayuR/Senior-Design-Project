@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Any
 
 from app.database.db import get_connection
+from app.mqtt_bridge import publish_light_command
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now_iso() -> str:
@@ -165,6 +169,9 @@ class LightService:
             brightness=next_brightness,
         )
         self.repository.add_history(restaurant_id, action)
+
+        publish_light_command(next_state)
+
         return self._to_status_response(updated)
 
     def schedule_light(

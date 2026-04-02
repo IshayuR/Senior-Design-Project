@@ -1,11 +1,10 @@
-from datetime import date, datetime
+import logging
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
-from app.database.mongo import get_schedule_collection
+from app.database.db import get_connection
 from app.models.light import (
     CustomScheduleUpsertRequest,
-    CustomDateEntry,
     LightHistoryItem,
     LightStatusResponse,
     ScheduleLightRequest,
@@ -14,6 +13,8 @@ from app.models.light import (
     WeeklyScheduleUpsertRequest,
 )
 from app.services.light_service import LightService, SQLiteLightRepository
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/lights", tags=["lights"])
 service = LightService(repository=SQLiteLightRepository())
@@ -25,10 +26,24 @@ def get_light_status(restaurantId: int = Query(..., ge=1)) -> dict:
 
 
 @router.post("/toggle", response_model=LightStatusResponse)
-def toggle_light(payload: ToggleLightRequest) -> dict:
+def toggle_light(payload: ToggleLightRequest, request: Request) -> dict:
     if payload.action != "toggle":
         raise HTTPException(status_code=400, detail="action must be 'toggle'")
-    return service.toggle_light(payload.restaurantId)
+
+    result = service.toggle_light(payload.restaurantId)
+
+    mqtt_client = getattr(request.app.state, "mqtt", None)
+    if mqtt_client and mqtt_client.is_connected:
+        command = "on" if result["state"] == "on" else "off"
+        try:
+            mqtt_client.publish_command(command)
+            logger.info("MQTT command '%s' sent to ESP32", command)
+        except Exception as exc:
+            logger.error("Failed to send MQTT command: %s", exc)
+    else:
+        logger.warning("MQTT not connected — toggle applied to DB only")
+
+    return result
 
 
 @router.post("/schedule", response_model=LightStatusResponse)
@@ -45,85 +60,81 @@ def get_light_history(restaurantId: int | None = Query(default=None, ge=1)) -> l
     return service.get_history(restaurantId)
 
 
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 @router.post("/schedule/weekly")
 def upsert_weekly_schedule(payload: WeeklyScheduleUpsertRequest) -> dict:
-    col = get_schedule_collection()
-    # Store one document per (restaurantId, dayOfWeek)
-    for day in payload.days:
-        col.update_one(
-            {
-                "restaurantId": payload.restaurantId,
-                "kind": "weekly",
-                "dayOfWeek": day.dayOfWeek,
-            },
-            {
-                "$set": {
-                    "enabled": day.enabled,
-                    "start": day.start,
-                    "stop": day.stop,
-                    "updatedAt": datetime.utcnow(),
-                }
-            },
-            upsert=True,
-        )
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        for day in payload.days:
+            cursor.execute(
+                """
+                INSERT INTO weekly_schedule (restaurant_id, day_of_week, enabled, start_time, stop_time, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(restaurant_id, day_of_week) DO UPDATE SET
+                    enabled = excluded.enabled,
+                    start_time = excluded.start_time,
+                    stop_time = excluded.stop_time,
+                    updated_at = excluded.updated_at
+                """,
+                (payload.restaurantId, day.dayOfWeek, int(day.enabled), day.start, day.stop, _utc_now_iso()),
+            )
     return {"ok": True}
 
 
 @router.post("/schedule/custom")
 def upsert_custom_schedule(payload: CustomScheduleUpsertRequest) -> dict:
-    col = get_schedule_collection()
-    # Remove any existing custom entries for this restaurant and re-insert
-    col.delete_many({"restaurantId": payload.restaurantId, "kind": "custom"})
-    docs: list[dict] = []
-    for entry in payload.dates:
-        docs.append(
-            {
-                "restaurantId": payload.restaurantId,
-                "kind": "custom",
-                "date": entry.schedule_date.isoformat(),
-                "start": entry.start,
-                "stop": entry.stop,
-                "updatedAt": datetime.utcnow(),
-            }
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM custom_schedule WHERE restaurant_id = ?",
+            (payload.restaurantId,),
         )
-    if docs:
-        col.insert_many(docs)
+        for entry in payload.dates:
+            cursor.execute(
+                """
+                INSERT INTO custom_schedule (restaurant_id, schedule_date, start_time, stop_time, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (payload.restaurantId, entry.schedule_date.isoformat(), entry.start, entry.stop, _utc_now_iso()),
+            )
     return {"ok": True}
 
 
 @router.get("/schedule/today", response_model=TodayScheduleResponse)
 def get_today_schedule(restaurantId: int = Query(..., ge=1)) -> dict:
     """Return today's effective on/off schedule, with custom dates overriding weekly."""
-    col = get_schedule_collection()
     today = date.today()
     today_iso = today.isoformat()
 
-    # 1) Custom override for today (highest priority)
-    custom_doc = col.find_one(
-        {"restaurantId": restaurantId, "kind": "custom", "date": today_iso}
-    )
-    if custom_doc:
-        return {
-            "restaurantId": restaurantId,
-            "scheduleOn": custom_doc.get("start"),
-            "scheduleOff": custom_doc.get("stop"),
-        }
+    with get_connection() as conn:
+        cursor = conn.cursor()
 
-    # 2) Weekly schedule for today's weekday (0=Monday..6=Sunday)
-    weekday = today.weekday()
-    weekly_doc = col.find_one(
-        {
-            "restaurantId": restaurantId,
-            "kind": "weekly",
-            "dayOfWeek": weekday,
-        }
-    )
-    if weekly_doc and weekly_doc.get("enabled", False):
-        return {
-            "restaurantId": restaurantId,
-            "scheduleOn": weekly_doc.get("start"),
-            "scheduleOff": weekly_doc.get("stop"),
-        }
+        cursor.execute(
+            "SELECT start_time, stop_time FROM custom_schedule WHERE restaurant_id = ? AND schedule_date = ?",
+            (restaurantId, today_iso),
+        )
+        custom_row = cursor.fetchone()
+        if custom_row:
+            return {
+                "restaurantId": restaurantId,
+                "scheduleOn": custom_row["start_time"],
+                "scheduleOff": custom_row["stop_time"],
+            }
 
-    # 3) No schedule
+        weekday = today.weekday()
+        cursor.execute(
+            "SELECT enabled, start_time, stop_time FROM weekly_schedule WHERE restaurant_id = ? AND day_of_week = ?",
+            (restaurantId, weekday),
+        )
+        weekly_row = cursor.fetchone()
+        if weekly_row and weekly_row["enabled"]:
+            return {
+                "restaurantId": restaurantId,
+                "scheduleOn": weekly_row["start_time"],
+                "scheduleOff": weekly_row["stop_time"],
+            }
+
     return {"restaurantId": restaurantId, "scheduleOn": None, "scheduleOff": None}

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert, Modal } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert } from "react-native";
 import BottomNav from "./BottomNav";
 import { useLighting } from "../lightingStore";
 
@@ -46,25 +46,11 @@ function formatMonthDayYear(d: Date): string {
 
 type ScheduleTab = "weekly" | "custom";
 
-const US_TIME_ZONE_OPTIONS = [
-  { label: "Samoa (SST)", value: "SST" },
-  { label: "Hawaii-Aleutian (HST)", value: "HST" },
-  { label: "Alaska (AKST)", value: "AKST" },
-  { label: "Pacific (PST)", value: "PST" },
-  { label: "Mountain (MST)", value: "MST" },
-  { label: "Mountain - Arizona (MST)", value: "MST (AZ)" },
-  { label: "Central (CST)", value: "CST" },
-  { label: "Eastern (EST)", value: "EST" },
-  { label: "Atlantic (AST)", value: "AST" },
-  { label: "Chamorro (ChST)", value: "CHST" },
-];
-
 export default function ScheduleScreen() {
   const [activeTab, setActiveTab] = useState<ScheduleTab>("weekly");
-  const [timeZone] = useState<string>("EST");
   const [days, setDays] = useState<DaySchedule[]>(initialDays);
   const [specificDates, setSpecificDates] = useState<SpecificDateEntry[]>([]);
-  const { saveSchedule, loading } = useLighting();
+  const { saveWeeklySchedule, saveCustomSchedule, loading } = useLighting();
 
   const toggleDay = (id: string) => {
     setDays((prev: DaySchedule[]) => prev.map((d) => (d.id === id ? { ...d, enabled: !d.enabled } : d)));
@@ -75,10 +61,44 @@ export default function ScheduleScreen() {
   };
 
   const onApplySchedule = async () => {
-    const active = days.find((d) => d.enabled) ?? days[0];
     try {
-      await saveSchedule(active.start, active.stop, timeZone);
-      Alert.alert("Saved", `Backend schedule updated (${active.start} -> ${active.stop}).`);
+      // Map UI days (SUN..SAT) to backend weekday indices (0=Monday..6=Sunday)
+      const backendDays = days.map((d) => {
+        const label = d.id;
+        let dayOfWeek = 0;
+        switch (label) {
+          case "mon":
+            dayOfWeek = 0;
+            break;
+          case "tue":
+            dayOfWeek = 1;
+            break;
+          case "wed":
+            dayOfWeek = 2;
+            break;
+          case "thu":
+            dayOfWeek = 3;
+            break;
+          case "fri":
+            dayOfWeek = 4;
+            break;
+          case "sat":
+            dayOfWeek = 5;
+            break;
+          case "sun":
+          default:
+            dayOfWeek = 6;
+            break;
+        }
+        return {
+          dayOfWeek,
+          enabled: d.enabled,
+          start: d.start,
+          stop: d.stop,
+        };
+      });
+      await saveWeeklySchedule(backendDays);
+      Alert.alert("Saved", "Weekly schedule updated.");
     } catch (err) {
       Alert.alert("Error", err instanceof Error ? err.message : "Failed to save schedule");
     }
@@ -106,11 +126,23 @@ export default function ScheduleScreen() {
     setSpecificDates((prev: SpecificDateEntry[]) => prev.filter((e) => e.id !== id));
   };
 
-  const onSaveSpecificDates = () => {
-    Alert.alert(
-      "Specific dates",
-      "Specific date overrides are saved locally. Backend support for these dates can be added later."
-    );
+  const onSaveSpecificDates = async () => {
+    try {
+      const payload = specificDates.map((e) => {
+        // Convert MM-DD-YYYY to YYYY-MM-DD for backend
+        const [mm, dd, yyyy] = e.date.split("-");
+        const isoDate = `${yyyy}-${mm}-${dd}`;
+        return {
+          date: isoDate,
+          start: e.start,
+          stop: e.stop,
+        };
+      });
+      await saveCustomSchedule(payload);
+      Alert.alert("Saved", "Custom dates updated. These override the weekly schedule when dates match.");
+    } catch (err) {
+      Alert.alert("Error", err instanceof Error ? err.message : "Failed to save custom dates");
+    }
   };
 
   return (
@@ -139,15 +171,6 @@ export default function ScheduleScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.timeZoneCard}>
-          <Text style={styles.timeZoneTitle}>Time zone</Text>
-          <Text style={styles.timeZoneSubtitle}>Choose your U.S. time zone.</Text>
-          <Pressable style={styles.dropdownButton} onPress={() => setTimeZoneDropdownOpen(true)}>
-            <Text style={styles.dropdownButtonText}>{timeZone}</Text>
-            <Text style={styles.dropdownChevron}>▼</Text>
-          </Pressable>
-        </View>
-
         {activeTab === "weekly" && (
           <>
             <Text style={styles.title}>Weekly schedule</Text>
@@ -281,34 +304,6 @@ export default function ScheduleScreen() {
         )}
       </ScrollView>
 
-      <Modal
-        transparent
-        visible={timeZoneDropdownOpen}
-        animationType="fade"
-        onRequestClose={() => setTimeZoneDropdownOpen(false)}
-      >
-        <Pressable style={styles.modalBackdrop} onPress={() => setTimeZoneDropdownOpen(false)}>
-          <Pressable style={styles.dropdownModalCard} onPress={() => undefined}>
-            <Text style={styles.dropdownModalTitle}>Select time zone</Text>
-            <ScrollView style={styles.dropdownOptionsScroll} showsVerticalScrollIndicator={false}>
-              {US_TIME_ZONE_OPTIONS.map((option) => (
-                <Pressable
-                  key={option.label}
-                  style={[styles.dropdownOption, timeZone === option.value && styles.dropdownOptionActive]}
-                  onPress={() => {
-                    setTimeZone(option.value);
-                    setTimeZoneDropdownOpen(false);
-                  }}
-                >
-                  <Text style={styles.dropdownOptionLabel}>{option.label}</Text>
-                  <Text style={styles.dropdownOptionValue}>{option.value}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
-
       <BottomNav />
     </View>
   );
@@ -370,89 +365,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#5F6E5A",
     marginBottom: 18,
-  },
-  timeZoneCard: {
-    backgroundColor: "#F2F7EF",
-    borderRadius: 18,
-    paddingHorizontal: 18,
-    paddingVertical: 14,
-    marginBottom: 18,
-    borderWidth: 1,
-    borderColor: "#DEE7D7",
-  },
-  timeZoneTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#1F261E",
-    marginBottom: 4,
-  },
-  timeZoneSubtitle: {
-    fontSize: 13,
-    color: "#5F6E5A",
-    marginBottom: 10,
-  },
-  dropdownButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: "#D6E0D1",
-  },
-  dropdownButtonText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#273024",
-  },
-  dropdownChevron: {
-    fontSize: 12,
-    color: "#5F6E5A",
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.25)",
-    justifyContent: "center",
-    paddingHorizontal: 20,
-  },
-  dropdownModalCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    padding: 14,
-    maxHeight: "70%",
-  },
-  dropdownModalTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#1F261E",
-    marginBottom: 10,
-  },
-  dropdownOptionsScroll: {
-    maxHeight: 360,
-  },
-  dropdownOption: {
-    paddingVertical: 10,
-    paddingHorizontal: 10,
-    borderRadius: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  dropdownOptionActive: {
-    backgroundColor: "#ECF4E7",
-  },
-  dropdownOptionLabel: {
-    fontSize: 14,
-    color: "#273024",
-    flex: 1,
-    marginRight: 8,
-  },
-  dropdownOptionValue: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#3B6D31",
   },
   dayCard: {
     backgroundColor: "#F2F7EF",

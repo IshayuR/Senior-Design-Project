@@ -20,8 +20,8 @@ class LightStatusResponse(BaseModel):
     state: Literal["on", "off"]
     brightness: int
     lastUpdated: datetime
-    scheduleOn: str | None = None  # HH:MM (24h)
-    scheduleOff: str | None = None  # HH:MM (24h)
+    scheduleOn: str | None = None
+    scheduleOff: str | None = None
 
 
 class LightHistoryItem(BaseModel):
