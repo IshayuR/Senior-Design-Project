@@ -96,7 +96,6 @@ export const LightingProvider = ({ children }: { children: ReactNode }) => {
       await refreshHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown toggle error");
-      throw err;
     } finally {
       setLoading(false);
     }
@@ -148,7 +147,6 @@ export const LightingProvider = ({ children }: { children: ReactNode }) => {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown schedule error");
-      throw err;
     } finally {
       setLoading(false);
     }

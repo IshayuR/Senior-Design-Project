@@ -2,6 +2,7 @@ import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 from typing import Iterator
 
@@ -12,6 +13,10 @@ DB_PATH = Path(os.getenv("LIGHTS_DB_PATH", str(DEFAULT_DB_PATH)))
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _hash_password(raw: str) -> str:
+    return sha256(raw.encode("utf-8")).hexdigest()
 
 
 @contextmanager
@@ -80,9 +85,35 @@ def init_db() -> None:
         )
         cursor.execute(
             """
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                restaurant_id INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        cursor.execute(
+            """
             INSERT OR IGNORE INTO restaurant_lights (
                 restaurant_id, state, brightness, schedule_on, schedule_off, last_updated
             ) VALUES (?, ?, ?, ?, ?, ?)
             """,
             (1, "off", 0, None, None, _utc_now_iso()),
+        )
+        cursor.execute(
+            """
+            INSERT OR IGNORE INTO users (
+                email, name, password_hash, restaurant_id, created_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "wei.wei@uconn.edu",
+                "Wei Wei",
+                _hash_password("password123"),
+                1,
+                _utc_now_iso(),
+            ),
         )

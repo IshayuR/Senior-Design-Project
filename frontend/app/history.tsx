@@ -1,6 +1,7 @@
 import { View, Text, StyleSheet, ScrollView, Pressable } from "react-native";
 import BottomNav from "./BottomNav";
 import { useLighting } from "../lightingStore";
+import { formatUtcToLocalDateTime } from "../utils/datetime";
 
 const BG = "#DEEAD9";
 
@@ -28,11 +29,7 @@ export default function HistoryScreen() {
         ) : (
           history.map((entry) => (
             <View key={entry.id} style={styles.pill}>
-              <Text style={styles.pillText}>
-                {new Date(entry.timestamp).toLocaleDateString()} •{" "}
-                {new Date(entry.timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} :{" "}
-                {entry.action}
-              </Text>
+              <Text style={styles.pillText}>{formatUtcToLocalDateTime(entry.timestamp)}: {entry.action}</Text>
             </View>
           ))
         )}
