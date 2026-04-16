@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.database.db import init_db
 from app.mqtt_bridge import connect as mqtt_connect, disconnect as mqtt_disconnect
+from app.routes.auth import router as auth_router
 from app.routes.lights import router as lights_router
 from app.scheduler import start_scheduler, stop_scheduler
 
@@ -52,3 +53,4 @@ def health() -> dict[str, str]:
 
 
 app.include_router(lights_router)
+app.include_router(auth_router)
