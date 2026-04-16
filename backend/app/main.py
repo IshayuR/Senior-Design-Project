@@ -1,19 +1,26 @@
 import logging
 import os
 import sys
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import AsyncIterator
+
+from dotenv import load_dotenv
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+
+# Load repo-root .env before importing app modules that read os.environ (Mongo, etc.)
+_env = Path(__file__).resolve().parent.parent.parent / ".env"
+load_dotenv(_env)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-
 from app.database.db import init_db
 from app.mqtt_bridge import connect as mqtt_connect, disconnect as mqtt_disconnect
+from app.routes.auth import router as auth_router
 from app.routes.lights import router as lights_router
 from app.scheduler import start_scheduler, stop_scheduler
-
-_env = Path(__file__).resolve().parent.parent.parent / ".env"
-load_dotenv(_env)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -80,3 +87,4 @@ def health() -> dict[str, str]:
 
 
 app.include_router(lights_router)
+app.include_router(auth_router)
