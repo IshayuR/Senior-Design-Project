@@ -2,12 +2,13 @@ import { View, Text, StyleSheet, Pressable } from "react-native";
 import { useRouter } from "expo-router";
 import { useLighting } from "../lightingStore";
 import BottomNav from "./BottomNav";
+import { formatUtcToLocalTime } from "../utils/datetime";
 
 const BG = "#DEEAD9";
 const BULB_SIZE = 150;
 
 export default function DashboardScreen() {
-  const { isOn, toggleLight } = useLighting();
+  const { isOn, lastUpdated, toggleLight } = useLighting();
   const router = useRouter();
 
   const bulbColor = isOn ? "#FFF58A" : "#E2E2E2";
@@ -41,6 +42,7 @@ export default function DashboardScreen() {
         </Pressable>
 
         <Text style={styles.statusText}>{statusText}</Text>
+        <Text style={styles.updatedText}>Updated: {formatUtcToLocalTime(lastUpdated)}</Text>
 
         <View style={styles.middleButtonsRow}>
           <Pressable
@@ -179,6 +181,12 @@ const styles = StyleSheet.create({
     marginTop: 24,
     fontSize: 24,
     fontWeight: "800",
+  },
+  updatedText: {
+    marginTop: 6,
+    fontSize: 13,
+    color: "#4f5a4d",
+    fontWeight: "500",
   },
   middleButtonsRow: {
     flexDirection: "row",
