@@ -8,7 +8,7 @@ Full-stack proof of concept for CSE Senior Design:
 - AWS IoT Core integration via MQTT (paho-mqtt)
 - Weekly and custom date scheduling with automatic light control
 - ESP32 device simulator for end-to-end testing without hardware
-- Repository/service abstraction for later MongoDB migration
+- Local SQLite-backed login for development
 
 ---
 
@@ -82,6 +82,9 @@ Frontend (Expo / React Native)
   - `id` (auto), `restaurant_id`, `schedule_date` (YYYY-MM-DD)
   - `start_time`, `stop_time`, `updated_at`
   - Unique constraint: `(restaurant_id, schedule_date)`
+- `users`
+  - `id` (auto), `email`, `name`, `password_hash`, `restaurant_id`, `created_at`
+  - Used for local development login
 
 ### Data Flow
 
@@ -240,8 +243,7 @@ Start this first so it's ready when the backend connects. On startup the simulat
 
 ```bash
 source venv/bin/activate
-cd backend
-uvicorn app.main:app --reload --host 0.0.0.0
+python main.py
 ```
 
 On startup the backend connects to AWS IoT Core via MQTT. When you toggle lights from the frontend, the backend publishes `on`/`off` to the ESP32 cmd topic automatically.
@@ -254,7 +256,7 @@ Backend URL: `http://127.0.0.1:8000`
 
 ```bash
 cd frontend
-npm start
+npx expo start -c
 ```
 
 Then:
@@ -270,6 +272,7 @@ Then:
 | Method | Path                                    | Description                               |
 | ------ | --------------------------------------- | ----------------------------------------- |
 | `GET`  | `/health`                               | Health check                              |
+| `POST` | `/auth/login`                           | Local development login                   |
 | `GET`  | `/lights/status?restaurantId=1`         | Current light state                       |
 | `POST` | `/lights/toggle`                        | Toggle light on/off (also publishes MQTT) |
 | `POST` | `/lights/schedule`                      | Set simple schedule on/off times          |
@@ -281,6 +284,9 @@ Then:
 Example payloads:
 
 ```jsonc
+// POST /auth/login
+{ "email": "wei.wei@uconn.edu", "password": "password123" }
+
 // POST /lights/toggle
 { "restaurantId": 1, "action": "toggle" }
 
@@ -307,6 +313,11 @@ Example payloads:
 
 Interactive API docs available at `http://127.0.0.1:8000/docs`.
 
+Local dev login:
+
+- Email: `wei.wei@uconn.edu`
+- Password: `password123`
+
 ---
 
 ## Scheduling
@@ -329,6 +340,11 @@ Custom date schedules override the weekly schedule when dates match.
 ```bash
 # Health check
 curl http://127.0.0.1:8000/health
+
+# Login
+curl -X POST http://127.0.0.1:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"wei.wei@uconn.edu","password":"password123"}'
 
 # Light status
 curl "http://127.0.0.1:8000/lights/status?restaurantId=1"
@@ -357,7 +373,7 @@ curl "http://127.0.0.1:8000/lights/history?restaurantId=1"
 ### Frontend to Backend to ESP32
 
 1. Start the simulator, backend, and frontend (see Run the Project above).
-2. Open the app and login.
+2. Open the app and log in with `wei.wei@uconn.edu` / `password123`.
 3. On Dashboard, tap the bulb to toggle lights.
 4. Watch the backend logs for `MQTT bridge: published 'on'`.
 5. Watch the simulator for `Received cmd <- 'on'` and `LOAD=ON`.
@@ -391,6 +407,8 @@ curl "http://127.0.0.1:8000/lights/history?restaurantId=1"
 sqlite3 backend/app/database/lights.db \
   "SELECT * FROM restaurant_lights; \
    SELECT '---'; \
+   SELECT email, name, restaurant_id FROM users; \
+   SELECT '---'; \
    SELECT * FROM light_history ORDER BY timestamp DESC LIMIT 5; \
    SELECT '---'; \
    SELECT * FROM weekly_schedule;"
@@ -417,10 +435,10 @@ cd frontend && npm install
 source venv/bin/activate && python -m aws.simulate_esp32
 
 # run-backend
-source venv/bin/activate && cd backend && uvicorn app.main:app --reload --host 0.0.0.0
+source venv/bin/activate && python main.py
 
 # run-frontend
-cd frontend && npm start
+cd frontend && npx expo start -c
 ```
 
 ### Test
@@ -463,4 +481,3 @@ kill -9 <PID>
 lsof -i :8081
 kill -9 <PID>
 ```
-
