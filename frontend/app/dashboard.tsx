@@ -1,5 +1,6 @@
+import React from "react";
 import { View, Text, StyleSheet, Pressable } from "react-native";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { useLighting } from "../lightingStore";
 import BottomNav from "./BottomNav";
 import { formatUtcToLocalTime } from "../utils/datetime";
@@ -8,11 +9,38 @@ const BG = "#DEEAD9";
 const BULB_SIZE = 150;
 
 export default function DashboardScreen() {
-  const { isOn, lastUpdated, toggleLight } = useLighting();
+  const { isOn, lastUpdated, toggleLight, refreshStatus } = useLighting();
   const router = useRouter();
 
   const bulbColor = isOn ? "#FFF58A" : "#E2E2E2";
   const statusText = isOn ? "On" : "Off";
+
+  useFocusEffect(
+    React.useCallback(() => {
+      let active = true;
+
+      const syncStatus = async () => {
+        try {
+          await refreshStatus();
+        } catch {
+          // Keep the dashboard usable even if a background refresh fails.
+        }
+      };
+
+      void syncStatus();
+
+      const intervalId = setInterval(() => {
+        if (active) {
+          void syncStatus();
+        }
+      }, 1000);
+
+      return () => {
+        active = false;
+        clearInterval(intervalId);
+      };
+    }, [refreshStatus])
+  );
 
   return (
     <View style={styles.container}>
