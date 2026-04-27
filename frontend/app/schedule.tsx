@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert, Modal } from "react-native";
+import { useFocusEffect } from "expo-router";
 import BottomNav from "./BottomNav";
 import { useLighting } from "../lightingStore";
 
@@ -36,6 +37,26 @@ function nextSpecificDateId() {
   return `specific-${specificDateIdCounter}`;
 }
 
+const DAY_ID_TO_BACKEND: Record<string, number> = {
+  mon: 0,
+  tue: 1,
+  wed: 2,
+  thu: 3,
+  fri: 4,
+  sat: 5,
+  sun: 6,
+};
+
+const BACKEND_TO_DAY_ID: Record<number, string> = {
+  0: "mon",
+  1: "tue",
+  2: "wed",
+  3: "thu",
+  4: "fri",
+  5: "sat",
+  6: "sun",
+};
+
 /** Format date as MM-DD-YYYY */
 function formatMonthDayYear(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -65,7 +86,61 @@ export default function ScheduleScreen() {
   const [timeZoneDropdownOpen, setTimeZoneDropdownOpen] = useState(false);
   const [days, setDays] = useState<DaySchedule[]>(initialDays);
   const [specificDates, setSpecificDates] = useState<SpecificDateEntry[]>([]);
-  const { saveWeeklySchedule, saveCustomSchedule, loading } = useLighting();
+  const { saveWeeklySchedule, saveCustomSchedule, fetchWeeklySchedule, fetchCustomSchedule, loading } = useLighting();
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+
+      const loadSchedules = async () => {
+        try {
+          const [weeklyDays, customDates] = await Promise.all([
+            fetchWeeklySchedule(),
+            fetchCustomSchedule(),
+          ]);
+
+          if (!active) {
+            return;
+          }
+
+          const weeklyById = new Map(
+            weeklyDays.map((day) => [BACKEND_TO_DAY_ID[day.dayOfWeek], day] as const)
+          );
+
+          setDays(
+            initialDays.map((day) => {
+              const saved = weeklyById.get(day.id);
+              return saved
+                ? { ...day, enabled: saved.enabled, start: saved.start, stop: saved.stop }
+                : day;
+            })
+          );
+
+          setSpecificDates(
+            customDates.map((entry) => {
+              const [yyyy, mm, dd] = entry.date.split("-");
+              return {
+                id: nextSpecificDateId(),
+                date: `${mm}-${dd}-${yyyy}`,
+                start: entry.start,
+                stop: entry.stop,
+              };
+            })
+          );
+        } catch {
+          if (active) {
+            // Keep the screen usable even if schedule hydration fails.
+          }
+        }
+      };
+
+      void loadSchedules();
+
+      return () => {
+        active = false;
+      };
+    }, [fetchCustomSchedule, fetchWeeklySchedule])
+  );
 
   const toggleDay = (id: string) => {
     setDays((prev: DaySchedule[]) => prev.map((d) => (d.id === id ? { ...d, enabled: !d.enabled } : d)));
@@ -79,40 +154,26 @@ export default function ScheduleScreen() {
     try {
       // Map UI days (SUN..SAT) to backend weekday indices (0=Monday..6=Sunday)
       const backendDays = days.map((d) => {
-        const label = d.id;
-        let dayOfWeek = 0;
-        switch (label) {
-          case "mon":
-            dayOfWeek = 0;
-            break;
-          case "tue":
-            dayOfWeek = 1;
-            break;
-          case "wed":
-            dayOfWeek = 2;
-            break;
-          case "thu":
-            dayOfWeek = 3;
-            break;
-          case "fri":
-            dayOfWeek = 4;
-            break;
-          case "sat":
-            dayOfWeek = 5;
-            break;
-          case "sun":
-          default:
-            dayOfWeek = 6;
-            break;
-        }
         return {
-          dayOfWeek,
+          dayOfWeek: DAY_ID_TO_BACKEND[d.id] ?? 6,
           enabled: d.enabled,
           start: d.start,
           stop: d.stop,
         };
       });
       await saveWeeklySchedule(backendDays);
+      const reloaded = await fetchWeeklySchedule();
+      const weeklyById = new Map(
+        reloaded.map((day) => [BACKEND_TO_DAY_ID[day.dayOfWeek], day] as const)
+      );
+      setDays(
+        initialDays.map((day) => {
+          const saved = weeklyById.get(day.id);
+          return saved
+            ? { ...day, enabled: saved.enabled, start: saved.start, stop: saved.stop }
+            : day;
+        })
+      );
       Alert.alert("Saved", `Weekly schedule updated (${timeZone}).`);
     } catch (err) {
       Alert.alert("Error", err instanceof Error ? err.message : "Failed to save schedule");
@@ -154,6 +215,18 @@ export default function ScheduleScreen() {
         };
       });
       await saveCustomSchedule(payload);
+      const reloaded = await fetchCustomSchedule();
+      setSpecificDates(
+        reloaded.map((entry) => {
+          const [yyyy, mm, dd] = entry.date.split("-");
+          return {
+            id: nextSpecificDateId(),
+            date: `${mm}-${dd}-${yyyy}`,
+            start: entry.start,
+            stop: entry.stop,
+          };
+        })
+      );
       Alert.alert("Saved", "Custom dates updated. These override the weekly schedule when dates match.");
     } catch (err) {
       Alert.alert("Error", err instanceof Error ? err.message : "Failed to save custom dates");

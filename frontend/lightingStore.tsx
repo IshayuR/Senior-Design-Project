@@ -41,6 +41,8 @@ type LightingContextType = {
   saveSchedule: (scheduleOn: string, scheduleOff: string, timeZone: string) => Promise<void>;
   saveWeeklySchedule: (days: WeeklyDaySchedule[]) => Promise<void>;
   saveCustomSchedule: (dates: CustomDateEntry[]) => Promise<void>;
+  fetchWeeklySchedule: () => Promise<WeeklyDaySchedule[]>;
+  fetchCustomSchedule: () => Promise<CustomDateEntry[]>;
 };
 
 const LightingContext = createContext<LightingContextType | undefined>(undefined);
@@ -147,6 +149,7 @@ export const LightingProvider = ({ children }: { children: ReactNode }) => {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown schedule error");
+      throw err;
     } finally {
       setLoading(false);
     }
@@ -173,6 +176,30 @@ export const LightingProvider = ({ children }: { children: ReactNode }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchWeeklySchedule = async () => {
+    const response = await fetch(`${baseUrl}/lights/schedule/weekly?restaurantId=${RESTAURANT_ID}`);
+    if (!response.ok) {
+      throw new Error(`Weekly schedule fetch failed (${response.status})`);
+    }
+    const body = (await response.json()) as {
+      restaurantId: number;
+      days: WeeklyDaySchedule[];
+    };
+    return body.days;
+  };
+
+  const fetchCustomSchedule = async () => {
+    const response = await fetch(`${baseUrl}/lights/schedule/custom?restaurantId=${RESTAURANT_ID}`);
+    if (!response.ok) {
+      throw new Error(`Custom schedule fetch failed (${response.status})`);
+    }
+    const body = (await response.json()) as {
+      restaurantId: number;
+      dates: CustomDateEntry[];
+    };
+    return body.dates;
   };
 
   useEffect(() => {
@@ -213,6 +240,8 @@ export const LightingProvider = ({ children }: { children: ReactNode }) => {
         saveSchedule,
         saveWeeklySchedule,
         saveCustomSchedule,
+        fetchWeeklySchedule,
+        fetchCustomSchedule,
       }}
     >
       {children}

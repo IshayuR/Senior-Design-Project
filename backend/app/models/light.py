@@ -54,6 +54,16 @@ class CustomScheduleUpsertRequest(BaseModel):
     dates: list[CustomDateEntry]
 
 
+class WeeklyScheduleResponse(BaseModel):
+    restaurantId: int
+    days: list[WeeklyDaySchedule]
+
+
+class CustomScheduleResponse(BaseModel):
+    restaurantId: int
+    dates: list[CustomDateEntry]
+
+
 class TodayScheduleResponse(BaseModel):
     restaurantId: int
     scheduleOn: str | None = None

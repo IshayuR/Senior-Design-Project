@@ -21,6 +21,7 @@ import signal
 import ssl
 import sys
 import time
+from datetime import datetime
 
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
@@ -38,6 +39,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+TELEMETRY_INTERVAL_SECONDS = 5.0
 
 
 def _resolve_path(path: str) -> str:
@@ -75,6 +77,7 @@ class ESP32Simulator:
         self._load_on = False
         self._mode = "auto"
         self._schedule = {f"s{index}_{field}": 0 for index in range(1, 7) for field in ("en", "start_h", "start_m", "end_h", "end_m")}
+        self._last_telemetry_monotonic = 0.0
 
         self._client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
@@ -108,6 +111,7 @@ class ESP32Simulator:
 
             self._publish_status("boot")
             self._publish_status("online")
+            self._publish_telemetry(force=True)
         else:
             logger.error("Connection failed — reason code: %s", reason_code)
 
@@ -169,7 +173,7 @@ class ESP32Simulator:
             )
             self._mode = "auto"
             self._publish_status("schedule_updated")
-            self._publish_telemetry()
+            self._apply_auto_schedule(force_publish=True)
 
     def _publish_status(self, status: str) -> None:
         body = json.dumps(
@@ -184,7 +188,10 @@ class ESP32Simulator:
         self._client.publish(TOPIC_STATUS, body, qos=1)
         logger.info("Published status '%s' → %s", status, TOPIC_STATUS)
 
-    def _publish_telemetry(self) -> None:
+    def _publish_telemetry(self, force: bool = False) -> None:
+        if not force and (time.monotonic() - self._last_telemetry_monotonic) < TELEMETRY_INTERVAL_SECONDS:
+            return
+
         body = {
             "device": DEVICE_ID,
             "uptime": int(time.monotonic()),
@@ -199,7 +206,49 @@ class ESP32Simulator:
         body.update(self._schedule)
         payload = json.dumps(body, separators=(",", ":"))
         self._client.publish(TOPIC_TELEMETRY, payload, qos=1)
+        self._last_telemetry_monotonic = time.monotonic()
         logger.info("Published telemetry → %s", TOPIC_TELEMETRY)
+
+    def _should_be_on_in_auto_mode(self) -> bool:
+        now = datetime.now()
+        current_minute_of_day = (now.hour * 60) + now.minute
+        should_be_on = True
+
+        for index in range(1, 7):
+            if int(self._schedule.get(f"s{index}_en", 0)) != 1:
+                continue
+
+            start_minute = (int(self._schedule.get(f"s{index}_start_h", 0)) * 60) + int(
+                self._schedule.get(f"s{index}_start_m", 0)
+            )
+            end_minute = (int(self._schedule.get(f"s{index}_end_h", 0)) * 60) + int(
+                self._schedule.get(f"s{index}_end_m", 0)
+            )
+
+            if start_minute < end_minute:
+                if start_minute <= current_minute_of_day < end_minute:
+                    should_be_on = False
+                    break
+            elif start_minute > end_minute:
+                if current_minute_of_day >= start_minute or current_minute_of_day < end_minute:
+                    should_be_on = False
+                    break
+            else:
+                should_be_on = False
+                break
+
+        return should_be_on
+
+    def _apply_auto_schedule(self, force_publish: bool = False) -> None:
+        if self._mode != "auto":
+            return
+
+        next_load_on = self._should_be_on_in_auto_mode()
+        state_changed = next_load_on != self._load_on
+        self._load_on = next_load_on
+
+        if state_changed or force_publish:
+            self._publish_telemetry(force=True)
 
     def run(self) -> None:
         logger.info("Connecting to %s:%d …", self._endpoint, PORT)
@@ -229,6 +278,8 @@ class ESP32Simulator:
 
         try:
             while not shutdown:
+                self._apply_auto_schedule()
+                self._publish_telemetry()
                 time.sleep(0.5)
         except KeyboardInterrupt:
             pass

@@ -6,11 +6,13 @@ from app.database.db import get_connection
 from app.mqtt_bridge import get_effective_schedule_window, sync_device_schedule
 from app.models.light import (
     CustomScheduleUpsertRequest,
+    CustomScheduleResponse,
     LightHistoryItem,
     LightStatusResponse,
     ScheduleLightRequest,
     TodayScheduleResponse,
     ToggleLightRequest,
+    WeeklyScheduleResponse,
     WeeklyScheduleUpsertRequest,
 )
 from app.services.light_service import LightService, SQLiteLightRepository
@@ -91,6 +93,63 @@ def upsert_custom_schedule(payload: CustomScheduleUpsertRequest) -> dict:
             )
     sync_device_schedule(payload.restaurantId)
     return {"ok": True}
+
+
+@router.get("/schedule/weekly", response_model=WeeklyScheduleResponse)
+def get_weekly_schedule(restaurantId: int = Query(..., ge=1)) -> dict:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT day_of_week, enabled, start_time, stop_time
+            FROM weekly_schedule
+            WHERE restaurant_id = ?
+            ORDER BY day_of_week ASC
+            """,
+            (restaurantId,),
+        )
+        rows = cursor.fetchall()
+
+    return {
+        "restaurantId": restaurantId,
+        "days": [
+            {
+                "dayOfWeek": row["day_of_week"],
+                "enabled": bool(row["enabled"]),
+                "start": row["start_time"],
+                "stop": row["stop_time"],
+            }
+            for row in rows
+        ],
+    }
+
+
+@router.get("/schedule/custom", response_model=CustomScheduleResponse)
+def get_custom_schedule(restaurantId: int = Query(..., ge=1)) -> dict:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT schedule_date, start_time, stop_time
+            FROM custom_schedule
+            WHERE restaurant_id = ?
+            ORDER BY schedule_date ASC
+            """,
+            (restaurantId,),
+        )
+        rows = cursor.fetchall()
+
+    return {
+        "restaurantId": restaurantId,
+        "dates": [
+            {
+                "date": row["schedule_date"],
+                "start": row["start_time"],
+                "stop": row["stop_time"],
+            }
+            for row in rows
+        ],
+    }
 
 
 @router.get("/schedule/today", response_model=TodayScheduleResponse)
