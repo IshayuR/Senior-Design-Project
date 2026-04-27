@@ -16,6 +16,9 @@ from typing import Callable
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
 
+from aws.device_protocol import build_schedule_payload, normalize_light_command
+from aws.iot_topics import KEEPALIVE, PORT, TOPIC_CMD, TOPIC_SCHEDULE, TOPIC_STATUS, TOPIC_TELEMETRY
+
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
@@ -26,13 +29,6 @@ ENDPOINT = os.getenv("AWS_IOT_ENDPOINT", "")
 CA_CERT = os.getenv("AWS_IOT_CA_CERT", "")
 BACKEND_CERT = os.getenv("AWS_IOT_BACKEND_CERT", "")
 BACKEND_KEY = os.getenv("AWS_IOT_BACKEND_KEY", "")
-
-DEVICE_ID = "ESP32_Device_01"
-TOPIC_CMD = f"esp32/{DEVICE_ID}/cmd"
-TOPIC_TELE = f"esp32/{DEVICE_ID}/tele"
-
-PORT = 8883
-KEEPALIVE = 60
 
 
 def _resolve_path(path: str) -> str:
@@ -54,10 +50,10 @@ class IoTMQTTClient:
     def __init__(
         self,
         client_id: str = "backend_server_01",
-        on_telemetry: Callable[[str], None] | None = None,
+        on_message: Callable[[str, str], None] | None = None,
     ) -> None:
         self._client_id = client_id
-        self._user_telemetry_cb = on_telemetry
+        self._user_message_cb = on_message
         self._connected = False
 
         endpoint = _require_env("AWS_IOT_ENDPOINT", ENDPOINT)
@@ -102,8 +98,9 @@ class IoTMQTTClient:
     ) -> None:
         if reason_code == 0:
             logger.info("Connected to AWS IoT Core as '%s'", self._client_id)
-            client.subscribe(TOPIC_TELE, qos=1)
-            logger.info("Subscribed to %s", TOPIC_TELE)
+            for topic in (TOPIC_TELEMETRY, TOPIC_STATUS):
+                client.subscribe(topic, qos=1)
+                logger.info("Subscribed to %s", topic)
             self._connected = True
         else:
             logger.error("Connection failed — reason code: %s", reason_code)
@@ -126,9 +123,9 @@ class IoTMQTTClient:
         msg: mqtt.MQTTMessage,
     ) -> None:
         payload = msg.payload.decode("utf-8", errors="replace")
-        logger.info("Telemetry ← [%s]: %s", msg.topic, payload)
-        if self._user_telemetry_cb:
-            self._user_telemetry_cb(payload)
+        logger.info("Device message ← [%s]: %s", msg.topic, payload)
+        if self._user_message_cb:
+            self._user_message_cb(msg.topic, payload)
 
     # ── Public API ──────────────────────────────────────────────────────
 
@@ -155,12 +152,23 @@ class IoTMQTTClient:
         logger.info("Disconnected from AWS IoT Core")
 
     def publish_command(self, command: str) -> None:
-        """Publish a command (e.g. 'on' / 'off') to the ESP32 cmd topic."""
+        """Publish a command (e.g. 'ON' / 'OFF' / 'AUTO' / 'DEMO') to the device."""
         if not self._connected:
             raise ConnectionError("Not connected to AWS IoT Core")
-        info = self._client.publish(TOPIC_CMD, command, qos=1)
+        normalized = normalize_light_command(command)
+        info = self._client.publish(TOPIC_CMD, normalized, qos=1)
         info.wait_for_publish(timeout=5)
-        logger.info("Command → [%s]: %s", TOPIC_CMD, command)
+        logger.info("Command → [%s]: %s", TOPIC_CMD, normalized)
+
+    def publish_schedule(self, schedule_on: str | None, schedule_off: str | None) -> str:
+        """Publish the firmware-specific schedule payload and return the JSON sent."""
+        if not self._connected:
+            raise ConnectionError("Not connected to AWS IoT Core")
+        payload = build_schedule_payload(schedule_on, schedule_off)
+        info = self._client.publish(TOPIC_SCHEDULE, payload, qos=1)
+        info.wait_for_publish(timeout=5)
+        logger.info("Schedule → [%s]: %s", TOPIC_SCHEDULE, payload)
+        return payload
 
     @property
     def is_connected(self) -> bool:

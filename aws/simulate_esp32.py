@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import json
 import signal
 import ssl
 import sys
@@ -23,6 +24,9 @@ import time
 
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
+
+from aws.device_protocol import parse_device_message
+from aws.iot_topics import DEVICE_ID, KEEPALIVE, PORT, TOPIC_CMD, TOPIC_SCHEDULE, TOPIC_STATUS, TOPIC_TELEMETRY
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -47,14 +51,6 @@ CA_CERT = os.getenv("AWS_IOT_CA_CERT", "")
 ESP32_CERT = os.getenv("AWS_IOT_ESP32_CERT", "")
 ESP32_KEY = os.getenv("AWS_IOT_ESP32_KEY", "")
 
-DEVICE_ID = "ESP32_Device_01"
-TOPIC_CMD = f"esp32/{DEVICE_ID}/cmd"
-TOPIC_TELE = f"esp32/{DEVICE_ID}/tele"
-
-PORT = 8883
-KEEPALIVE = 60
-
-
 def _require(name: str, value: str) -> str:
     if not value:
         logger.error("Missing env var: %s", name)
@@ -76,6 +72,9 @@ class ESP32Simulator:
 
         self._endpoint = endpoint
         self._connected = False
+        self._load_on = False
+        self._mode = "auto"
+        self._schedule = {f"s{index}_{field}": 0 for index in range(1, 7) for field in ("en", "start_h", "start_m", "end_h", "end_m")}
 
         self._client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
@@ -102,12 +101,13 @@ class ESP32Simulator:
     ) -> None:
         if reason_code == 0:
             logger.info("Connected to AWS IoT Core as '%s'", DEVICE_ID)
-            client.subscribe(TOPIC_CMD, qos=1)
-            logger.info("Subscribed to %s", TOPIC_CMD)
+            for topic in (TOPIC_CMD, TOPIC_SCHEDULE):
+                client.subscribe(topic, qos=1)
+                logger.info("Subscribed to %s", topic)
             self._connected = True
 
-            client.publish(TOPIC_TELE, "boot", qos=1)
-            logger.info("Published 'boot' → %s", TOPIC_TELE)
+            self._publish_status("boot")
+            self._publish_status("online")
         else:
             logger.error("Connection failed — reason code: %s", reason_code)
 
@@ -129,19 +129,77 @@ class ESP32Simulator:
         msg: mqtt.MQTTMessage,
     ) -> None:
         payload = msg.payload.decode("utf-8", errors="replace").strip()
-        logger.info("Received cmd ← [%s]: '%s'", msg.topic, payload)
+        logger.info("Received device message ← [%s]: '%s'", msg.topic, payload)
 
-        if payload == "on":
-            response = "LOAD=ON"
-        elif payload == "off":
-            response = "LOAD=OFF"
-        else:
-            response = f"UNKNOWN_CMD:{payload}"
-            logger.warning("Unrecognised command: '%s'", payload)
+        if msg.topic == TOPIC_CMD:
+            normalized = payload.upper()
+            if normalized == "ON":
+                self._load_on = True
+                self._mode = "manual"
+                self._publish_status("manual_on")
+            elif normalized == "OFF":
+                self._load_on = False
+                self._mode = "manual"
+                self._publish_status("manual_off")
+            elif normalized == "AUTO":
+                self._mode = "auto"
+                self._publish_status("auto_mode")
+            elif normalized == "DEMO":
+                self._mode = "demo"
+                self._load_on = False
+                self._publish_status("demo_mode")
+            else:
+                logger.warning("Unrecognized command: '%s'", payload)
+                return
 
-        logger.info("%s", response)
-        self._client.publish(TOPIC_TELE, response, qos=1)
-        logger.info("Published '%s' → %s", response, TOPIC_TELE)
+            self._publish_telemetry()
+            return
+
+        if msg.topic == TOPIC_SCHEDULE:
+            parsed = parse_device_message(payload)
+            if parsed is None:
+                self._publish_status("schedule_parse_error")
+                return
+
+            self._schedule.update(
+                {
+                    key: int(parsed.get(key, 0))
+                    for key in self._schedule
+                }
+            )
+            self._mode = "auto"
+            self._publish_status("schedule_updated")
+            self._publish_telemetry()
+
+    def _publish_status(self, status: str) -> None:
+        body = json.dumps(
+            {
+                "device": DEVICE_ID,
+                "status": status,
+                "ip": "127.0.0.1",
+                "uptime": int(time.monotonic()),
+            },
+            separators=(",", ":"),
+        )
+        self._client.publish(TOPIC_STATUS, body, qos=1)
+        logger.info("Published status '%s' → %s", status, TOPIC_STATUS)
+
+    def _publish_telemetry(self) -> None:
+        body = {
+            "device": DEVICE_ID,
+            "uptime": int(time.monotonic()),
+            "RMSvoltage": 120.0,
+            "maxVoltage": 170.0,
+            "current": 0.82 if self._load_on else 0.0,
+            "power": 98.4 if self._load_on else 0.0,
+            "load": 1 if self._load_on else 0,
+            "mode": self._mode,
+            "schedule_type": "off_blocks",
+        }
+        body.update(self._schedule)
+        payload = json.dumps(body, separators=(",", ":"))
+        self._client.publish(TOPIC_TELEMETRY, payload, qos=1)
+        logger.info("Published telemetry → %s", TOPIC_TELEMETRY)
 
     def run(self) -> None:
         logger.info("Connecting to %s:%d …", self._endpoint, PORT)

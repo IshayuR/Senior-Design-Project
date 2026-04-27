@@ -1,9 +1,9 @@
-import logging
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query
 
 from app.database.db import get_connection
+from app.mqtt_bridge import get_effective_schedule_window, sync_device_schedule
 from app.models.light import (
     CustomScheduleUpsertRequest,
     LightHistoryItem,
@@ -15,8 +15,6 @@ from app.models.light import (
 )
 from app.services.light_service import LightService, SQLiteLightRepository
 
-logger = logging.getLogger(__name__)
-
 router = APIRouter(prefix="/lights", tags=["lights"])
 service = LightService(repository=SQLiteLightRepository())
 
@@ -27,33 +25,22 @@ def get_light_status(restaurantId: int = Query(..., ge=1)) -> dict:
 
 
 @router.post("/toggle", response_model=LightStatusResponse)
-def toggle_light(payload: ToggleLightRequest, request: Request) -> dict:
+def toggle_light(payload: ToggleLightRequest) -> dict:
     if payload.action != "toggle":
         raise HTTPException(status_code=400, detail="action must be 'toggle'")
 
-    result = service.toggle_light(payload.restaurantId)
-
-    mqtt_client = getattr(request.app.state, "mqtt", None)
-    if mqtt_client and mqtt_client.is_connected:
-        command = "on" if result["state"] == "on" else "off"
-        try:
-            mqtt_client.publish_command(command)
-            logger.info("MQTT command '%s' sent to ESP32", command)
-        except Exception as exc:
-            logger.error("Failed to send MQTT command: %s", exc)
-    else:
-        logger.warning("MQTT not connected — toggle applied to DB only")
-
-    return result
+    return service.toggle_light(payload.restaurantId)
 
 
 @router.post("/schedule", response_model=LightStatusResponse)
 def schedule_light(payload: ScheduleLightRequest) -> dict:
-    return service.schedule_light(
+    result = service.schedule_light(
         restaurant_id=payload.restaurantId,
         schedule_on=payload.scheduleOn,
         schedule_off=payload.scheduleOff,
     )
+    sync_device_schedule(payload.restaurantId)
+    return result
 
 
 @router.get("/history", response_model=list[LightHistoryItem])
@@ -82,6 +69,7 @@ def upsert_weekly_schedule(payload: WeeklyScheduleUpsertRequest) -> dict:
                 """,
                 (payload.restaurantId, day.dayOfWeek, int(day.enabled), day.start, day.stop, _utc_now_iso()),
             )
+    sync_device_schedule(payload.restaurantId)
     return {"ok": True}
 
 
@@ -101,41 +89,12 @@ def upsert_custom_schedule(payload: CustomScheduleUpsertRequest) -> dict:
                 """,
                 (payload.restaurantId, entry.schedule_date.isoformat(), entry.start, entry.stop, _utc_now_iso()),
             )
+    sync_device_schedule(payload.restaurantId)
     return {"ok": True}
 
 
 @router.get("/schedule/today", response_model=TodayScheduleResponse)
 def get_today_schedule(restaurantId: int = Query(..., ge=1)) -> dict:
     """Return today's effective on/off schedule, with custom dates overriding weekly."""
-    today = date.today()
-    today_iso = today.isoformat()
-
-    with get_connection() as conn:
-        cursor = conn.cursor()
-
-        cursor.execute(
-            "SELECT start_time, stop_time FROM custom_schedule WHERE restaurant_id = ? AND schedule_date = ?",
-            (restaurantId, today_iso),
-        )
-        custom_row = cursor.fetchone()
-        if custom_row:
-            return {
-                "restaurantId": restaurantId,
-                "scheduleOn": custom_row["start_time"],
-                "scheduleOff": custom_row["stop_time"],
-            }
-
-        weekday = today.weekday()
-        cursor.execute(
-            "SELECT enabled, start_time, stop_time FROM weekly_schedule WHERE restaurant_id = ? AND day_of_week = ?",
-            (restaurantId, weekday),
-        )
-        weekly_row = cursor.fetchone()
-        if weekly_row and weekly_row["enabled"]:
-            return {
-                "restaurantId": restaurantId,
-                "scheduleOn": weekly_row["start_time"],
-                "scheduleOff": weekly_row["stop_time"],
-            }
-
-    return {"restaurantId": restaurantId, "scheduleOn": None, "scheduleOff": None}
+    schedule_on, schedule_off = get_effective_schedule_window(restaurantId, date.today())
+    return {"restaurantId": restaurantId, "scheduleOn": schedule_on, "scheduleOff": schedule_off}

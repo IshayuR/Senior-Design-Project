@@ -9,60 +9,33 @@ schedule's start or stop time.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
+from datetime import date
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from app.database.db import get_connection
-from app.mqtt_bridge import publish_light_command
+from app.mqtt_bridge import sync_device_schedule
 
 logger = logging.getLogger(__name__)
 
 _scheduler: BackgroundScheduler | None = None
+_last_sync_key: str | None = None
 
 RESTAURANT_ID = 1
 
 
-def _check_schedule() -> None:
-    """Fetch today's schedule from SQLite; publish MQTT if current time matches."""
-    now_hhmm = datetime.now().strftime("%H:%M")
-    today = date.today()
-    today_iso = today.isoformat()
-
+def _sync_today_schedule() -> None:
+    """Push today's schedule to the physical device when the effective date changes."""
+    global _last_sync_key
+    today_iso = date.today().isoformat()
+    if _last_sync_key == today_iso:
+        return
     try:
-        with get_connection() as conn:
-            cursor = conn.cursor()
-
-            cursor.execute(
-                "SELECT start_time, stop_time FROM custom_schedule "
-                "WHERE restaurant_id = ? AND schedule_date = ?",
-                (RESTAURANT_ID, today_iso),
-            )
-            row = cursor.fetchone()
-
-            if not row:
-                weekday = today.weekday()
-                cursor.execute(
-                    "SELECT start_time, stop_time FROM weekly_schedule "
-                    "WHERE restaurant_id = ? AND day_of_week = ? AND enabled = 1",
-                    (RESTAURANT_ID, weekday),
-                )
-                row = cursor.fetchone()
-
-            if not row:
-                return
-
-            schedule_on = row["start_time"]
-            schedule_off = row["stop_time"]
-
-            if schedule_on and now_hhmm == schedule_on:
-                publish_light_command("on")
-                logger.info("Scheduler: applied schedule_on at %s", now_hhmm)
-            elif schedule_off and now_hhmm == schedule_off:
-                publish_light_command("off")
-                logger.info("Scheduler: applied schedule_off at %s", now_hhmm)
+        payload = sync_device_schedule(RESTAURANT_ID)
+        if payload is not None:
+            _last_sync_key = today_iso
+            logger.info("Scheduler: synced today's device schedule")
     except Exception as e:
-        logger.error("Scheduler: check failed – %s", e)
+        logger.error("Scheduler: sync failed – %s", e)
 
 
 def start_scheduler() -> None:
@@ -72,13 +45,14 @@ def start_scheduler() -> None:
         return
     _scheduler = BackgroundScheduler()
     _scheduler.add_job(
-        _check_schedule,
+        _sync_today_schedule,
         trigger="cron",
         minute="*",
-        id="check_light_schedule",
+        id="sync_light_schedule",
     )
     _scheduler.start()
-    logger.info("Scheduler: started (checking every minute)")
+    _sync_today_schedule()
+    logger.info("Scheduler: started (syncing every minute)")
 
 
 def stop_scheduler() -> None:

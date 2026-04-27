@@ -13,7 +13,7 @@
 const char* AP_SSID = "LightController_Setup";
 const char* AP_PASS = "setup1234";
 
-const char* AWS_ENDPOINT = "ah8986rqx0pyd-ats.iot.us-east-2.amazonaws.com";
+const char* AWS_ENDPOINT = "a34pq72gp9sk70-ats.iot.us-east-1.amazonaws.com";
 const char* CLIENT_ID    = "ESP32_Device_01";
 
 const char* TOPIC_CMD    = "esp32/ESP32_Device_01/cmd";

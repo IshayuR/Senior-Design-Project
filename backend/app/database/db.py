@@ -42,10 +42,26 @@ def init_db() -> None:
                 brightness INTEGER NOT NULL CHECK(brightness >= 0 AND brightness <= 100),
                 schedule_on TEXT,
                 schedule_off TEXT,
+                device_mode TEXT,
+                device_status TEXT,
+                device_ip TEXT,
+                last_seen_at TEXT,
                 last_updated TEXT NOT NULL
             )
             """
         )
+        cursor.execute("PRAGMA table_info(restaurant_lights)")
+        columns = {row["name"] for row in cursor.fetchall()}
+        for name, definition in (
+            ("device_mode", "TEXT"),
+            ("device_status", "TEXT"),
+            ("device_ip", "TEXT"),
+            ("last_seen_at", "TEXT"),
+        ):
+            if name not in columns:
+                cursor.execute(
+                    f"ALTER TABLE restaurant_lights ADD COLUMN {name} {definition}"
+                )
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS light_history (

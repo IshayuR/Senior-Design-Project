@@ -17,6 +17,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import json
 import sys
 import threading
 import time
@@ -35,36 +36,50 @@ logger = logging.getLogger(__name__)
 TIMEOUT = 10  # seconds to wait for each response
 
 
-def _run_test(client: IoTMQTTClient, command: str, expected: str) -> bool:
-    """Publish *command*, wait up to TIMEOUT for *expected* on tele topic."""
+def _matches_expected(topic: str, payload: str, expected_status: str, expected_load: int) -> bool:
+    try:
+        message = json.loads(payload)
+    except json.JSONDecodeError:
+        return False
+
+    if topic.endswith("/status"):
+        return message.get("status") == expected_status
+    if topic.endswith("/tele"):
+        return message.get("load") == expected_load
+    return False
+
+
+def _run_test(client: IoTMQTTClient, command: str, expected_status: str, expected_load: int) -> bool:
+    """Publish *command*, wait up to TIMEOUT for firmware-style status/telemetry."""
     result: dict[str, str | None] = {"payload": None}
     event = threading.Event()
 
-    original_cb = client._user_telemetry_cb
+    original_cb = client._user_message_cb
 
-    def _capture(payload: str) -> None:
+    def _capture(topic: str, payload: str) -> None:
         result["payload"] = payload
-        if payload == expected:
+        if _matches_expected(topic, payload, expected_status, expected_load):
             event.set()
         if original_cb:
-            original_cb(payload)
+            original_cb(topic, payload)
 
-    client._user_telemetry_cb = _capture
+    client._user_message_cb = _capture
 
     logger.info("Publishing command: '%s'", command)
     client.publish_command(command)
 
     received = event.wait(timeout=TIMEOUT)
-    client._user_telemetry_cb = original_cb
+    client._user_message_cb = original_cb
 
     if received:
         logger.info("PASS  — sent '%s', received '%s'", command, result["payload"])
         return True
 
     logger.error(
-        "FAIL  — sent '%s', expected '%s', got '%s' (timeout=%ds)",
+        "FAIL  — sent '%s', expected status='%s' load=%s, got '%s' (timeout=%ds)",
         command,
-        expected,
+        expected_status,
+        expected_load,
         result["payload"],
         TIMEOUT,
     )
@@ -92,9 +107,9 @@ def main() -> None:
 
     results: list[bool] = []
 
-    results.append(_run_test(client, "on", "LOAD=ON"))
+    results.append(_run_test(client, "ON", "manual_on", 1))
     time.sleep(1)
-    results.append(_run_test(client, "off", "LOAD=OFF"))
+    results.append(_run_test(client, "OFF", "manual_off", 0))
 
     client.disconnect()
 
