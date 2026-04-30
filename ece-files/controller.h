@@ -17,10 +17,11 @@
 #define RESET_BUTTON_PIN 25
 
 #define MID_BIAS 1.65f
-#define CURRENT_SENSITIVITY 0.025f
+#define CURRENT_SENSITIVITY 0.019f
 #define SCALE 200.0f
 
 #define MAX_SCHEDULE_BLOCKS 6
+#define MAX_SAVED_DATES 31
 
 extern const char* AP_SSID;
 extern const char* AP_PASS;
@@ -40,6 +41,7 @@ extern const unsigned long DEMO_TOGGLE_MS;
 extern const unsigned long RMS_WINDOW_MS;
 extern const unsigned long WIFI_CONNECT_TIMEOUT_MS;
 extern const unsigned long TELE_INTERVAL_MS;
+extern const unsigned long MQTT_RECONNECT_INTERVAL_MS;
 
 extern const char AWS_CERT_CA[];
 extern const char AWS_CERT_CRT[];
@@ -85,6 +87,16 @@ struct ScheduleBlock {
   int offMinuteOfDay;
 };
 
+struct DateSchedule {
+  bool valid;
+  int date;
+  ScheduleBlock blocks[MAX_SCHEDULE_BLOCKS];
+};
+
+struct ScheduleStore {
+  DateSchedule days[MAX_SAVED_DATES];
+};
+
 struct ControlState {
   bool demoMode;
   unsigned long lastDemoToggleMs;
@@ -116,6 +128,8 @@ extern MeasurementState meas;
 extern ControlState ctrl;
 extern RuntimeState runState;
 extern WifiState wifiState;
+extern ScheduleStore scheduleStore;
+extern int activeScheduleDate;
 
 extern WiFiClientSecure net;
 extern PubSubClient mqtt;
@@ -126,22 +140,44 @@ bool loadWiFiCreds();
 void saveWiFiCreds(const String& ssid, const String& pass);
 void clearWiFiCreds();
 void checkResetButton();
+
 String htmlPage();
 void startProvisioningMode();
+
 bool connectWiFi();
 void serviceWiFiReconnect();
+
 void syncTime();
+
 void publishStatus(const char* statusMsg);
+
 void connectAWS();
 void onMessage(char* topic, byte* payload, unsigned int len);
+
+void loadScheduleStore();
+void saveScheduleStore();
+void clearScheduleStore();
+
+bool validDate(int date);
+int getTodayDate();
+int findDateScheduleIndex(int date);
+int findFreeScheduleIndex();
+int getSlotForDate(int date);
+
+void clearActiveScheduleBlocks();
+void applyScheduleForToday(bool force = false);
+bool parseAndSaveDatedSchedule(const char* msg);
 
 void startADS1115Conversion(uint8_t muxBits);
 int16_t readADS1115Result();
 float rawToVoltage(int16_t raw);
+
 float correctVoltageA0(float adcVoltage);
 float correctVoltageA1(float adcVoltage);
+
 float getCurrentInstant(float a0);
 float getHVINInstant(float a1);
+
 void serviceADS1115();
 
 float readVoltage();

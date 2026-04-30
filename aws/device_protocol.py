@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
+from datetime import date
 from typing import Any
 
 MAX_SCHEDULE_BLOCKS = 6
@@ -56,7 +57,15 @@ def _block(start_minute: int, end_minute: int, enabled: bool = True) -> Schedule
     )
 
 
-def build_schedule_payload(schedule_on: str | None, schedule_off: str | None) -> str:
+def _format_schedule_date(schedule_date: date) -> int:
+    return int(schedule_date.strftime("%Y%m%d"))
+
+
+def build_schedule_payload(
+    schedule_date: date,
+    schedule_on: str | None,
+    schedule_off: str | None,
+) -> str:
     """
     Convert a single UI "on window" into the firmware's 6-block "off window"
     JSON payload. Missing schedules become a full-day OFF block so the device
@@ -85,7 +94,9 @@ def build_schedule_payload(schedule_on: str | None, schedule_off: str | None) ->
     while len(blocks) < MAX_SCHEDULE_BLOCKS:
         blocks.append(_block(0, 0, enabled=False))
 
-    payload: dict[str, int] = {}
+    payload: dict[str, int] = {
+        "date": _format_schedule_date(schedule_date),
+    }
     for index, block in enumerate(blocks[:MAX_SCHEDULE_BLOCKS], start=1):
         block_dict = asdict(block)
         payload[f"s{index}_en"] = block_dict["enabled"]

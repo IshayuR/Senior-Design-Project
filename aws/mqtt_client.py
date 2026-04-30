@@ -11,6 +11,7 @@ import logging
 import os
 import ssl
 import time
+from datetime import date
 from typing import Callable
 
 import paho.mqtt.client as mqtt
@@ -160,11 +161,16 @@ class IoTMQTTClient:
         info.wait_for_publish(timeout=5)
         logger.info("Command → [%s]: %s", TOPIC_CMD, normalized)
 
-    def publish_schedule(self, schedule_on: str | None, schedule_off: str | None) -> str:
+    def publish_schedule(
+        self,
+        schedule_date: date,
+        schedule_on: str | None,
+        schedule_off: str | None,
+    ) -> str:
         """Publish the firmware-specific schedule payload and return the JSON sent."""
         if not self._connected:
             raise ConnectionError("Not connected to AWS IoT Core")
-        payload = build_schedule_payload(schedule_on, schedule_off)
+        payload = build_schedule_payload(schedule_date, schedule_on, schedule_off)
         info = self._client.publish(TOPIC_SCHEDULE, payload, qos=1)
         info.wait_for_publish(timeout=5)
         logger.info("Schedule → [%s]: %s", TOPIC_SCHEDULE, payload)

@@ -230,13 +230,15 @@ def sync_device_schedule(restaurant_id: int, force: bool = False) -> str | None:
         )
         return None
 
-    schedule_on, schedule_off = get_effective_schedule_window(restaurant_id)
+    schedule_date = date.today()
+    schedule_on, schedule_off = get_effective_schedule_window(restaurant_id, schedule_date)
 
     try:
-        payload = _client.publish_schedule(schedule_on, schedule_off)
+        payload = _client.publish_schedule(schedule_date, schedule_on, schedule_off)
         logger.info(
-            "MQTT bridge: synced device schedule for restaurant %s (%s -> %s)",
+            "MQTT bridge: synced device schedule for restaurant %s on %s (%s -> %s)",
             restaurant_id,
+            schedule_date.isoformat(),
             schedule_on,
             schedule_off,
         )
