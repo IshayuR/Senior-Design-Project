@@ -6,7 +6,10 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.database.db import get_connection
-from app.mqtt_bridge import publish_light_command
+from app.mqtt_bridge import (
+    MANUAL_OVERRIDE_AUTO_REVERT_SECONDS,
+    publish_light_command,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +173,11 @@ class LightService:
         )
         self.repository.add_history(restaurant_id, action)
 
-        publish_light_command(next_state)
+        publish_light_command(
+            next_state,
+            restaurant_id=restaurant_id,
+            auto_revert_after_seconds=MANUAL_OVERRIDE_AUTO_REVERT_SECONDS,
+        )
 
         return self._to_status_response(updated)
 

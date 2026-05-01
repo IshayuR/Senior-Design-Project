@@ -147,7 +147,17 @@ def snapshot_from_message(topic: str, payload: str) -> dict[str, Any]:
     if "mode" in message:
         snapshot["mode"] = str(message["mode"])
     elif "status" in message:
-        snapshot["status"] = str(message["status"])
+        status = str(message["status"])
+        snapshot["status"] = status
+
+        inferred_mode = {
+            "manual_on": "manual",
+            "manual_off": "manual",
+            "auto_mode": "auto",
+            "demo_mode": "demo",
+        }.get(status)
+        if inferred_mode is not None:
+            snapshot["mode"] = inferred_mode
 
     if "ip" in message:
         snapshot["ip"] = str(message["ip"])

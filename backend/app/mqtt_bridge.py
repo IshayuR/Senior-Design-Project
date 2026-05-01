@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import threading
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,9 @@ logger = logging.getLogger(__name__)
 
 _client: IoTMQTTClient | None = None
 RESTAURANT_ID = 1
+MANUAL_OVERRIDE_AUTO_REVERT_SECONDS = 30.0
+_auto_revert_lock = threading.Lock()
+_auto_revert_timers: dict[int, threading.Timer] = {}
 
 
 def _utc_now_iso() -> str:
@@ -173,6 +177,62 @@ def _handle_device_message(topic: str, payload: str) -> None:
     _update_device_snapshot(snapshot)
 
 
+def _pop_auto_revert_timer(restaurant_id: int) -> threading.Timer | None:
+    with _auto_revert_lock:
+        return _auto_revert_timers.pop(restaurant_id, None)
+
+
+def _cancel_auto_revert_timer(restaurant_id: int) -> None:
+    timer = _pop_auto_revert_timer(restaurant_id)
+    if timer is not None:
+        timer.cancel()
+
+
+def _publish_auto_revert(restaurant_id: int) -> None:
+    _pop_auto_revert_timer(restaurant_id)
+
+    if _client is None or not _client.is_connected:
+        logger.warning(
+            "MQTT bridge: not connected – skipping scheduled AUTO for restaurant %s",
+            restaurant_id,
+        )
+        return
+
+    try:
+        _client.publish_command("AUTO")
+        logger.info(
+            "MQTT bridge: published scheduled AUTO for restaurant %s",
+            restaurant_id,
+        )
+    except Exception as exc:
+        logger.error(
+            "MQTT bridge: scheduled AUTO publish failed for restaurant %s – %s",
+            restaurant_id,
+            exc,
+        )
+
+
+def _schedule_auto_revert(restaurant_id: int, delay_seconds: float) -> None:
+    _cancel_auto_revert_timer(restaurant_id)
+
+    timer = threading.Timer(
+        delay_seconds,
+        _publish_auto_revert,
+        args=(restaurant_id,),
+    )
+    timer.daemon = True
+
+    with _auto_revert_lock:
+        _auto_revert_timers[restaurant_id] = timer
+
+    timer.start()
+    logger.info(
+        "MQTT bridge: scheduled AUTO in %.1fs for restaurant %s",
+        delay_seconds,
+        restaurant_id,
+    )
+
+
 def connect() -> None:
     """Connect to AWS IoT Core. Call once at app startup."""
     global _client
@@ -194,6 +254,8 @@ def connect() -> None:
 def disconnect() -> None:
     """Disconnect from AWS IoT Core. Call at app shutdown."""
     global _client
+    for restaurant_id in list(_auto_revert_timers):
+        _cancel_auto_revert_timer(restaurant_id)
     if _client is not None:
         try:
             _client.disconnect()
@@ -203,16 +265,26 @@ def disconnect() -> None:
         logger.info("MQTT bridge: disconnected")
 
 
-def publish_light_command(state: str) -> None:
+def publish_light_command(
+    state: str,
+    restaurant_id: int = RESTAURANT_ID,
+    auto_revert_after_seconds: float | None = None,
+) -> None:
     """Publish a light command to the ESP32 command topic. No-op if not connected."""
+    normalized = state.strip().upper()
+    if normalized in {"AUTO", "DEMO"}:
+        _cancel_auto_revert_timer(restaurant_id)
+
     if _client is None or not _client.is_connected:
         logger.warning(
             "MQTT bridge: not connected – skipping command '%s'", state
         )
         return
     try:
-        _client.publish_command(state)
-        logger.info("MQTT bridge: published '%s'", state)
+        _client.publish_command(normalized)
+        logger.info("MQTT bridge: published '%s'", normalized)
+        if normalized in {"ON", "OFF"} and auto_revert_after_seconds is not None:
+            _schedule_auto_revert(restaurant_id, auto_revert_after_seconds)
     except Exception as e:
         logger.error("MQTT bridge: publish failed – %s", e)
 
